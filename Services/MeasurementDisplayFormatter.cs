@@ -119,6 +119,7 @@ namespace GreenWoodWorkAging.Services
         /// </summary>
         public static string FormatSides(MeasurementSide side) => side switch
         {
+            MeasurementSide.NoTape            => "No tape",
             MeasurementSide.Height            => "H",
             MeasurementSide.Width             => "W",
             MeasurementSide.HeightHeight      => "H+H",

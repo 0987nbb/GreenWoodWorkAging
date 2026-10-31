@@ -6,6 +6,15 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Branding, and the version the installer is built from. -->
+    <Product>Green Wood Works</Product>
+    <AssemblyTitle>Green Wood Works — Carpenter Measurement Calculator</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+
+    <!-- The shop only ever runs in English; the desktop runtime ships ~20 other locales. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <!-- Logo resource -->
@@ -13,18 +22,46 @@
     <Content Include="Resources\logo.jpg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- The window/taskbar icon, read at run time; also copied so the installer can use it. -->
+    <Content Include="Resources\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
-  <!-- Exclude the test project subfolder from this WinForms build -->
+  <!-- OCR language data for the image import; Tesseract needs the folder at run time. -->
+  <ItemGroup>
+    <Content Include="Resources\tessdata\eng.traineddata">
+      <Link>tessdata\eng.traineddata</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    The C runtime that x64\tesseract50.dll and leptonica were built against. A clean Windows
+    install has the Universal CRT but not this one, so it ships beside the exe instead of
+    asking the customer for the Visual C++ redistributable.
+  -->
+  <ItemGroup>
+    <Content Include="Resources\vc-runtime\*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Exclude the test project and the build tools from this WinForms build -->
   <ItemGroup>
     <Compile Remove="GreenWoodWorkAging.Tests\**" />
+    <Compile Remove="tools\**" />
     <None Remove="GreenWoodWorkAging.Tests\**" />
+    <None Remove="tools\**" />
     <EmbeddedResource Remove="GreenWoodWorkAging.Tests\**" />
     <Content Remove="GreenWoodWorkAging.Tests\**" />
+    <Content Remove="tools\**" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageReference Include="QuestPDF" Version="2026.9.1" />
+    <PackageReference Include="Tesseract" Version="5.2.0" />
   </ItemGroup>
 
 </Project>

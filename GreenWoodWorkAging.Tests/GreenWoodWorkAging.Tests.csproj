@@ -2,7 +2,9 @@
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- Windows target so the sheet diagrams can be rendered to a file and checked. -->
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -12,6 +14,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="QuestPDF" Version="2026.9.1" />
+    <PackageReference Include="Tesseract" Version="5.2.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -19,15 +22,42 @@
     </PackageReference>
   </ItemGroup>
 
-  <!-- Link source files from the parent project (without WinForms UI) -->
+  <!-- Link source files from the parent project (the form itself stays out) -->
   <ItemGroup>
     <Compile Include="..\Models\MeasurementEntry.cs" Link="Models\MeasurementEntry.cs" />
     <Compile Include="..\Models\GrandTotalResult.cs" Link="Models\GrandTotalResult.cs" />
     <Compile Include="..\Models\BillCharges.cs" Link="Models\BillCharges.cs" />
+    <Compile Include="..\Models\SheetCutting.cs" Link="Models\SheetCutting.cs" />
+    <Compile Include="..\Models\ImportedSize.cs" Link="Models\ImportedSize.cs" />
+    <!-- Only the import review window, so its layout can be rendered and looked at. -->
+    <Compile Include="..\ImageImportForm.cs" Link="ImageImportForm.cs" />
     <Compile Include="..\Services\MeasurementCalculatorService.cs" Link="Services\MeasurementCalculatorService.cs" />
+    <!-- The review windows carry the branded title-bar icon, so the icon loader comes too. -->
+    <Compile Include="..\Services\AppIcon.cs" Link="Services\AppIcon.cs" />
     <Compile Include="..\Services\MeasurementInputValidator.cs" Link="Services\MeasurementInputValidator.cs" />
     <Compile Include="..\Services\MeasurementDisplayFormatter.cs" Link="Services\MeasurementDisplayFormatter.cs" />
     <Compile Include="..\Services\BillPdfService.cs" Link="Services\BillPdfService.cs" />
+    <Compile Include="..\Services\SheetCuttingOptimizer.cs" Link="Services\SheetCuttingOptimizer.cs" />
+    <Compile Include="..\Services\SheetDiagramRenderer.cs" Link="Services\SheetDiagramRenderer.cs" />
+    <Compile Include="..\Services\SheetPlanPdfService.cs" Link="Services\SheetPlanPdfService.cs" />
+    <!-- Only the two review windows, so their layout can be rendered and looked at. -->
+    <Compile Include="..\SheetOptimizerForm.cs" Link="SheetOptimizerForm.cs" />
+    <Compile Include="..\Services\SizeListParser.cs" Link="Services\SizeListParser.cs" />
+    <Compile Include="..\Services\ImagePreprocessor.cs" Link="Services\ImagePreprocessor.cs" />
+    <Compile Include="..\Services\ImageSizeImporter.cs" Link="Services\ImageSizeImporter.cs" />
+  </ItemGroup>
+
+  <!-- The OCR reader looks for its language file next to the assembly. -->
+  <ItemGroup>
+    <Content Include="..\Resources\tessdata\eng.traineddata">
+      <Link>tessdata\eng.traineddata</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- The review windows load their title-bar icon from here, like the shipped app does. -->
+    <Content Include="..\Resources\app.ico">
+      <Link>Resources\app.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

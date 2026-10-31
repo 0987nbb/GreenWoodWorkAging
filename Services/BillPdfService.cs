@@ -16,6 +16,13 @@ namespace GreenWoodWorkAging.Services
         public IReadOnlyList<MeasurementEntry> Rows    { get; init; } = Array.Empty<MeasurementEntry>();
         public BillCharges Charges { get; init; } = new();
         public byte[]? Logo        { get; init; }
+
+        /// <summary>False for an invoice: the customer sees the totals, not the size-by-size list.</summary>
+        public bool ShowMeasurements { get; init; } = true;
+
+        /// <summary>Printed under "For GreenWood Works" on the signature line, when set.</summary>
+        public string? SignatoryName  { get; init; }
+        public string? SignatoryPhone { get; init; }
     }
 
     /// <summary>
@@ -28,6 +35,10 @@ namespace GreenWoodWorkAging.Services
     {
         public const string ShopName    = "GreenWood Works";
         public const string ShopTagline = "Carpenter measurement & cutting";
+
+        /// <summary>Who signs an invoice for the shop.</summary>
+        public const string OwnerName  = "Shabir";
+        public const string OwnerPhone = "0345 3345136";
 
         static readonly PdfColor Brand     = PdfColor.FromHex("#34855A");
         static readonly PdfColor BrandDark = PdfColor.FromHex("#1E4B33");
@@ -114,7 +125,8 @@ namespace GreenWoodWorkAging.Services
                    .BorderLeft(3).BorderColor(Brand)
                    .PaddingVertical(9).PaddingHorizontal(12).Column(meta =>
                 {
-                    meta.Item().Text(t => t.Span("MEASUREMENT BILL").FontSize(10).Bold().FontColor(BrandDark));
+                    meta.Item().Text(t => t.Span(data.ShowMeasurements ? "MEASUREMENT BILL" : "INVOICE")
+                                           .FontSize(10).Bold().FontColor(BrandDark));
                     MetaRow("Bill #", data.BillNumber == 0 ? "—" : data.BillNumber.ToString());
                     MetaRow("Date",   data.Date.ToString("dd MMM yyyy"));
 
@@ -144,52 +156,11 @@ namespace GreenWoodWorkAging.Services
                 row.RelativeItem().Column(c => Detail(c, "ITEMS", $"{totals.TotalRows} rows · {totals.TotalPieces} pieces"));
             });
 
-            col.Item().PaddingTop(16).Table(table =>
-            {
-                table.ColumnsDefinition(columns =>
-                {
-                    columns.ConstantColumn(34);              // #
-                    columns.RelativeColumn(1.1f);            // Height
-                    columns.RelativeColumn(1.1f);            // Width
-                    columns.ConstantColumn(44);              // Qty
-                    columns.RelativeColumn(1.5f);            // Tape sides
-                    columns.RelativeColumn(1.6f);            // Total inches
-                    columns.RelativeColumn(1.5f);            // Feet
-                });
-
-                table.Header(header =>
-                {
-                    HeaderCell(header, "#");
-                    HeaderCell(header, "Height (in)");
-                    HeaderCell(header, "Width (in)");
-                    HeaderCell(header, "Qty");
-                    HeaderCell(header, "Tape sides");
-                    HeaderCell(header, "Total inches");
-                    HeaderCell(header, "Feet");
-                });
-
-                int i = 0;
-                foreach (var m in data.Rows)
-                {
-                    var shade = i++ % 2 == 0 ? Paper : RowAlt;
-                    RowCell(shade, m.SerialNumber.ToString());
-                    RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter));
-                    RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter));
-                    RowCell(shade, m.Quantity.ToString());
-                    RowCell(shade, MeasurementDisplayFormatter.FormatSides(m.Side));
-                    RowCell(shade, Fmt.FormatCompactFromEighths(m.RowTotalEighths));
-                    RowCell(shade, $"{m.RowTotalEighths / 96m:0.00}");
-
-                    void RowCell(PdfColor back, string text) =>
-                        table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
-                             .PaddingVertical(7).PaddingHorizontal(10)
-                             .Text(text).FontSize(9).FontColor(Ink);
-                }
-
-                table.Cell().ColumnSpan(7).Background(BrandDark).PaddingVertical(9).PaddingHorizontal(10)
-                     .Text(t => t.Span($"GRAND TOTAL     {grandIn} in          {grandFt}")
-                                 .FontSize(9.5f).Bold().FontColor(Paper));
-            });
+            if (data.ShowMeasurements)
+                col.Item().PaddingTop(16).Table(table => MeasurementTable(table, data, grandIn, grandFt));
+            else
+                col.Item().PaddingTop(16).Border(0.8f).BorderColor(Line).CornerRadius(6)
+                   .PaddingHorizontal(14).PaddingVertical(4).Column(c => TotalsOnly(c, totals, eighths, grandIn, grandFt));
 
             // Rows/pieces and the inch/feet grand total are already printed on the items
             // line and the table's total bar, so charges take the full width here.
@@ -205,7 +176,89 @@ namespace GreenWoodWorkAging.Services
             {
                 row.RelativeItem().Column(c => Sign(c, "Customer signature"));
                 row.ConstantItem(26);
-                row.RelativeItem().Column(c => Sign(c, $"For {ShopName}"));
+                row.RelativeItem().Column(c =>
+                {
+                    Sign(c, $"For {ShopName}");
+                    if (data.SignatoryName != null)
+                        c.Item().PaddingTop(3).Text(data.SignatoryName).FontSize(10).Bold().FontColor(Ink);
+                    if (data.SignatoryPhone != null)
+                        c.Item().PaddingTop(1).Text(data.SignatoryPhone).FontSize(8.5f).FontColor(Subtle);
+                });
+            });
+        }
+
+        /// <summary>The size-by-size list the grid shows, with the grand total on the last bar.</summary>
+        private static void MeasurementTable(TableDescriptor table, BillPdfData data, string grandIn, string grandFt)
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.ConstantColumn(34);              // #
+                columns.RelativeColumn(1.1f);            // Height
+                columns.RelativeColumn(1.1f);            // Width
+                columns.ConstantColumn(44);              // Qty
+                columns.RelativeColumn(1.5f);            // Tape sides
+                columns.RelativeColumn(1.6f);            // Total inches
+                columns.RelativeColumn(1.5f);            // Feet
+            });
+
+            table.Header(header =>
+            {
+                HeaderCell(header, "#");
+                HeaderCell(header, "Height (in)");
+                HeaderCell(header, "Width (in)");
+                HeaderCell(header, "Qty");
+                HeaderCell(header, "Tape sides");
+                HeaderCell(header, "Total inches");
+                HeaderCell(header, "Feet");
+            });
+
+            int i = 0;
+            foreach (var m in data.Rows)
+            {
+                var shade = i++ % 2 == 0 ? Paper : RowAlt;
+                RowCell(shade, m.SerialNumber.ToString());
+                RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter));
+                RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter));
+                RowCell(shade, m.Quantity.ToString());
+                RowCell(shade, MeasurementDisplayFormatter.FormatSides(m.Side));
+                RowCell(shade, Fmt.FormatCompactFromEighths(m.RowTotalEighths));
+                RowCell(shade, $"{m.RowTotalEighths / 96m:0.00}");
+
+                void RowCell(PdfColor back, string text) =>
+                    table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
+                         .PaddingVertical(7).PaddingHorizontal(10)
+                         .Text(text).FontSize(9).FontColor(Ink);
+            }
+
+            table.Cell().ColumnSpan(7).Background(BrandDark).PaddingVertical(9).PaddingHorizontal(10)
+                 .Text(t => t.Span($"GRAND TOTAL     {grandIn} in          {grandFt}")
+                             .FontSize(9.5f).Bold().FontColor(Paper));
+        }
+
+        /// <summary>
+        /// An invoice states what was measured without showing where each board goes: the same
+        /// grand total the bill's last bar carries, on its own.
+        /// </summary>
+        private static void TotalsOnly(ColumnDescriptor col, GrandTotalResult totals,
+                                       int eighths, string grandIn, string grandFt)
+        {
+            col.Item().PaddingVertical(10).Row(row =>
+            {
+                row.RelativeItem().Column(c =>
+                {
+                    c.Item().Text("MEASUREMENT TOTAL").FontSize(8).FontColor(Subtle);
+                    c.Item().PaddingTop(3).Text(t =>
+                    {
+                        t.Span($"{grandIn} in").FontSize(16).Bold().FontColor(BrandDark);
+                        t.Span($"      {grandFt}").FontSize(11).FontColor(Ink);
+                    });
+                });
+
+                row.RelativeItem().AlignRight().AlignMiddle().Column(c =>
+                {
+                    c.Item().Text($"{totals.TotalRows} items  ·  {totals.TotalPieces} pieces").FontSize(9).FontColor(Subtle);
+                    c.Item().PaddingTop(3).Text($"{BillCharges.Feet(eighths):0.00} ft of tape").FontSize(9).FontColor(Subtle);
+                });
             });
         }
 

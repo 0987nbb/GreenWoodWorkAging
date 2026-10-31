@@ -93,5 +93,61 @@ namespace GreenWoodWorkAging
 
             Assert.True(File.Exists(Path.Combine(dir, "short0.png")));
         }
+
+        /// <summary>
+        /// An invoice is the same letterhead with the size list taken out and the shop owner
+        /// signing it. Written next to the bill so the two can be compared by eye.
+        /// </summary>
+        [Fact]
+        public void Invoice_KeepsTotalsButDropsTheMeasurementTable()
+        {
+            string path = Path.Combine(Path.GetTempPath(), "gwa-invoice-test.pdf");
+
+            var data = Sample();
+            var invoice = new BillPdfData
+            {
+                CustomerName     = data.CustomerName,
+                Phone            = data.Phone,
+                Date             = data.Date,
+                BillNumber       = data.BillNumber,
+                Rows             = data.Rows,
+                Charges          = data.Charges,
+                Logo             = data.Logo,
+                ShowMeasurements = false,
+                SignatoryName    = BillPdfService.OwnerName,
+                SignatoryPhone   = BillPdfService.OwnerPhone
+            };
+
+            BillPdfService.Generate(path, invoice);
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(path), 0, 4));
+
+            string dir = Path.Combine(Path.GetTempPath(), "gwa-pdf", DateTime.Now.ToString("HHmmss"));
+            Directory.CreateDirectory(dir);
+            BillPdfService.Build(invoice).GenerateImages(p => Path.Combine(dir, $"invoice{p}.png"),
+                new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+            Assert.True(File.Exists(Path.Combine(dir, "invoice0.png")));
+        }
+
+        /// <summary>
+        /// A piece that is cut but never taped still has to appear on the customer's bill, so the
+        /// size list matches what left the shop — it simply bills nothing.
+        /// </summary>
+        [Fact]
+        public void Bill_ANoTapeRow_IsPrintedWithZeroInches()
+        {
+            var rows = FourRows.Concat(new[]
+            {
+                new MeasurementEntry { SerialNumber = 5, HeightInches = 30, WidthInches = 4, Quantity = 3, Side = MeasurementSide.NoTape }
+            }).ToList();
+
+            string dir = Path.Combine(Path.GetTempPath(), "gwa-pdf", DateTime.Now.ToString("HHmmssff"));
+            Directory.CreateDirectory(dir);
+
+            var data = Sample(rows: rows);
+            BillPdfService.Build(data).GenerateImages(p => Path.Combine(dir, $"notape{p}.png"),
+                new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+
+            Assert.True(File.Exists(Path.Combine(dir, "notape0.png")));
+        }
     }
 }

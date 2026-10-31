@@ -15,12 +15,10 @@ namespace GreenWoodWorkAging.Services
 
         public DatabaseService()
         {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "GreenWoodWorkAging");
+            string dir = AppPaths.DataDirectory;
             Directory.CreateDirectory(dir);
 
-            string dbPath = Path.Combine(dir, "greenwoodwork.db");
+            string dbPath = AppPaths.DatabaseFile;
             _connectionString = $"Data Source={dbPath}";
             InitSchema();
         }

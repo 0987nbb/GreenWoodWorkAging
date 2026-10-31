@@ -22,7 +22,13 @@ namespace GreenWoodWorkAging.Models
         /// <summary>2 sides — Height + Height.</summary>
         HeightHeight      = 6,
         /// <summary>2 sides — Width + Width.</summary>
-        WidthWidth        = 7
+        WidthWidth        = 7,
+        /// <summary>
+        /// No tape at all. The piece is still cut to its height × width and still shows on the
+        /// cutting plan, it simply bills nothing. Added last so every stored value keeps its
+        /// meaning; the count of tape edges is 0 rather than a missing case.
+        /// </summary>
+        NoTape            = 8
     }
 
     /// <summary>
@@ -64,6 +70,7 @@ namespace GreenWoodWorkAging.Models
         /// <summary>How many tape edges run along the height for this selection.</summary>
         public int HeightSides => Side switch
         {
+            MeasurementSide.NoTape            => 0,
             MeasurementSide.Height            => 1,
             MeasurementSide.Width             => 0,
             MeasurementSide.HeightHeight      => 2,
@@ -77,6 +84,7 @@ namespace GreenWoodWorkAging.Models
         /// <summary>How many tape edges run along the width for this selection.</summary>
         public int WidthSides => Side switch
         {
+            MeasurementSide.NoTape            => 0,
             MeasurementSide.Height            => 0,
             MeasurementSide.Width             => 1,
             MeasurementSide.HeightHeight      => 0,
@@ -87,7 +95,7 @@ namespace GreenWoodWorkAging.Models
             _                                 => 2
         };
 
-        /// <summary>Total tape edges billed per piece (1–4).</summary>
+        /// <summary>Tape edges billed per piece — 0 for a piece that is cut but not taped.</summary>
         public int TapeSides => HeightSides + WidthSides;
 
         public int HeightEighths   => HeightInches * 8 + HeightSooter;
