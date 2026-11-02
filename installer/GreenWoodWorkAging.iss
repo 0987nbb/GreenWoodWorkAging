@@ -17,7 +17,7 @@
 
 ; build-installer.ps1 always passes this; the default only keeps ISCC usable on its own.
 #ifndef AppVersion
-  #define AppVersion "2.0.0"
+  #define AppVersion "2.1.0"
 #endif
 
 [Setup]

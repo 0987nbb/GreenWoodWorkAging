@@ -218,6 +218,28 @@ namespace GreenWoodWorkAging.Services
             Exec(cn, "CREATE INDEX IF NOT EXISTS idx_meas_bill   ON Measurements(BillId);");
             Exec(cn, "CREATE INDEX IF NOT EXISTS idx_stock_name  ON SheetStock(CustomerName COLLATE NOCASE);");
             Exec(cn, "CREATE INDEX IF NOT EXISTS idx_stock_bill  ON SheetStock(BillId);");
+
+            // Manual Invoices table — standalone customer bills created manually
+            Exec(cn, @"
+                CREATE TABLE IF NOT EXISTS ManualInvoices (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CustomerName    TEXT    NOT NULL,
+                    PhoneNumber     TEXT    NOT NULL DEFAULT '',
+                    InvoiceDate     TEXT    NOT NULL,
+                    CreatedAt       TEXT    NOT NULL,
+                    TotalTapesFeet  REAL    NOT NULL DEFAULT 0,
+                    TapeRate        REAL    NOT NULL DEFAULT 0,
+                    TapeAmount      REAL    NOT NULL DEFAULT 0,
+                    SheetCuts       INTEGER NOT NULL DEFAULT 0,
+                    RatePerSheetCut REAL    NOT NULL DEFAULT 0,
+                    CuttingAmount   REAL    NOT NULL DEFAULT 0,
+                    CarriageCharges REAL    NOT NULL DEFAULT 0,
+                    GrandTotal      REAL    NOT NULL DEFAULT 0,
+                    Notes           TEXT    NOT NULL DEFAULT ''
+                );");
+            Exec(cn, "CREATE INDEX IF NOT EXISTS idx_manual_inv_name  ON ManualInvoices(CustomerName COLLATE NOCASE);");
+            Exec(cn, "CREATE INDEX IF NOT EXISTS idx_manual_inv_phone ON ManualInvoices(PhoneNumber);");
+            Exec(cn, "CREATE INDEX IF NOT EXISTS idx_manual_inv_date  ON ManualInvoices(InvoiceDate);");
             Exec(cn, "CREATE INDEX IF NOT EXISTS idx_stock_visit ON SheetStock(VisitId);");
         }
 
@@ -707,6 +729,167 @@ namespace GreenWoodWorkAging.Services
             using var cn  = Open();
             using var cmd = cn.CreateCommand();
             cmd.CommandText = "DELETE FROM SheetStock WHERE Id=$id;";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        //  Manual Invoices
+        // ════════════════════════════════════════════════════════════════════════
+
+        public ManualInvoice SaveManualInvoice(ManualInvoice inv)
+        {
+            using var cn = Open();
+            string date = inv.InvoiceDate.ToString("yyyy-MM-dd");
+
+            if (inv.Id == 0)
+            {
+                using var ins = cn.CreateCommand();
+                ins.CommandText = @"
+                    INSERT INTO ManualInvoices (CustomerName, PhoneNumber, InvoiceDate, CreatedAt,
+                                               TotalTapesFeet, TapeRate, TapeAmount,
+                                               SheetCuts, RatePerSheetCut, CuttingAmount,
+                                               CarriageCharges, GrandTotal, Notes)
+                    VALUES ($name, $phone, $date, $created,
+                            $tapes, $tapeRate, $tapeAmt,
+                            $cuts, $cutRate, $cutAmt,
+                            $carriage, $grandTotal, $notes);
+                    SELECT last_insert_rowid();";
+                ins.Parameters.AddWithValue("$name",       inv.CustomerName);
+                ins.Parameters.AddWithValue("$phone",      inv.PhoneNumber);
+                ins.Parameters.AddWithValue("$date",       date);
+                ins.Parameters.AddWithValue("$created",    inv.CreatedAt.ToString("o"));
+                ins.Parameters.AddWithValue("$tapes",      (double)inv.TotalTapesFeet);
+                ins.Parameters.AddWithValue("$tapeRate",   (double)inv.TapeRate);
+                ins.Parameters.AddWithValue("$tapeAmt",    (double)inv.TapeAmount);
+                ins.Parameters.AddWithValue("$cuts",       inv.SheetCuts);
+                ins.Parameters.AddWithValue("$cutRate",    (double)inv.RatePerSheetCut);
+                ins.Parameters.AddWithValue("$cutAmt",     (double)inv.CuttingAmount);
+                ins.Parameters.AddWithValue("$carriage",   (double)inv.CarriageCharges);
+                ins.Parameters.AddWithValue("$grandTotal", (double)inv.GrandTotal);
+                ins.Parameters.AddWithValue("$notes",      inv.Notes ?? "");
+                inv.Id = Convert.ToInt32(ins.ExecuteScalar());
+            }
+            else
+            {
+                using var upd = cn.CreateCommand();
+                upd.CommandText = @"
+                    UPDATE ManualInvoices
+                       SET CustomerName    = $name,
+                           PhoneNumber     = $phone,
+                           InvoiceDate     = $date,
+                           TotalTapesFeet  = $tapes,
+                           TapeRate        = $tapeRate,
+                           TapeAmount      = $tapeAmt,
+                           SheetCuts       = $cuts,
+                           RatePerSheetCut = $cutRate,
+                           CuttingAmount   = $cutAmt,
+                           CarriageCharges = $carriage,
+                           GrandTotal      = $grandTotal,
+                           Notes           = $notes
+                     WHERE Id = $id;";
+                upd.Parameters.AddWithValue("$name",       inv.CustomerName);
+                upd.Parameters.AddWithValue("$phone",      inv.PhoneNumber);
+                upd.Parameters.AddWithValue("$date",       date);
+                upd.Parameters.AddWithValue("$tapes",      (double)inv.TotalTapesFeet);
+                upd.Parameters.AddWithValue("$tapeRate",   (double)inv.TapeRate);
+                upd.Parameters.AddWithValue("$tapeAmt",    (double)inv.TapeAmount);
+                upd.Parameters.AddWithValue("$cuts",       inv.SheetCuts);
+                upd.Parameters.AddWithValue("$cutRate",    (double)inv.RatePerSheetCut);
+                upd.Parameters.AddWithValue("$cutAmt",     (double)inv.CuttingAmount);
+                upd.Parameters.AddWithValue("$carriage",   (double)inv.CarriageCharges);
+                upd.Parameters.AddWithValue("$grandTotal", (double)inv.GrandTotal);
+                upd.Parameters.AddWithValue("$notes",      inv.Notes ?? "");
+                upd.Parameters.AddWithValue("$id",         inv.Id);
+                upd.ExecuteNonQuery();
+            }
+
+            return inv;
+        }
+
+        public List<ManualInvoice> SearchManualInvoices(string filter = "")
+        {
+            using var cn = Open();
+            using var cmd = cn.CreateCommand();
+
+            string f = filter.Trim();
+            string where = "";
+            if (!string.IsNullOrEmpty(f))
+            {
+                where = @"WHERE CustomerName LIKE $f COLLATE NOCASE
+                             OR PhoneNumber LIKE $f
+                             OR InvoiceDate LIKE $f";
+                cmd.Parameters.AddWithValue("$f", $"%{f}%");
+            }
+
+            cmd.CommandText = $@"
+                SELECT Id, CustomerName, PhoneNumber, InvoiceDate, CreatedAt,
+                       TotalTapesFeet, TapeRate, TapeAmount,
+                       SheetCuts, RatePerSheetCut, CuttingAmount,
+                       CarriageCharges, GrandTotal, Notes
+                  FROM ManualInvoices
+                  {where}
+                 ORDER BY InvoiceDate DESC, Id DESC;";
+
+            var list = new List<ManualInvoice>();
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                list.Add(new ManualInvoice
+                {
+                    Id              = rdr.GetInt32(0),
+                    CustomerName    = rdr.GetString(1),
+                    PhoneNumber     = rdr.IsDBNull(2) ? "" : rdr.GetString(2),
+                    InvoiceDate     = DateTime.TryParse(rdr.GetString(3), out var d) ? d : DateTime.Today,
+                    CreatedAt       = DateTime.TryParse(rdr.GetString(4), out var c) ? c : DateTime.Now,
+                    TotalTapesFeet  = Convert.ToDecimal(rdr.GetDouble(5)),
+                    TapeRate        = Convert.ToDecimal(rdr.GetDouble(6)),
+                    SheetCuts       = rdr.GetInt32(8),
+                    RatePerSheetCut = Convert.ToDecimal(rdr.GetDouble(9)),
+                    CarriageCharges = Convert.ToDecimal(rdr.GetDouble(11)),
+                    Notes           = rdr.IsDBNull(13) ? "" : rdr.GetString(13)
+                });
+            }
+
+            return list;
+        }
+
+        public ManualInvoice? GetManualInvoice(int id)
+        {
+            using var cn = Open();
+            using var cmd = cn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT Id, CustomerName, PhoneNumber, InvoiceDate, CreatedAt,
+                       TotalTapesFeet, TapeRate, TapeAmount,
+                       SheetCuts, RatePerSheetCut, CuttingAmount,
+                       CarriageCharges, GrandTotal, Notes
+                  FROM ManualInvoices
+                 WHERE Id = $id;";
+            cmd.Parameters.AddWithValue("$id", id);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return null;
+
+            return new ManualInvoice
+            {
+                Id              = rdr.GetInt32(0),
+                CustomerName    = rdr.GetString(1),
+                PhoneNumber     = rdr.IsDBNull(2) ? "" : rdr.GetString(2),
+                InvoiceDate     = DateTime.TryParse(rdr.GetString(3), out var d) ? d : DateTime.Today,
+                CreatedAt       = DateTime.TryParse(rdr.GetString(4), out var c) ? c : DateTime.Now,
+                TotalTapesFeet  = Convert.ToDecimal(rdr.GetDouble(5)),
+                TapeRate        = Convert.ToDecimal(rdr.GetDouble(6)),
+                SheetCuts       = rdr.GetInt32(8),
+                RatePerSheetCut = Convert.ToDecimal(rdr.GetDouble(9)),
+                CarriageCharges = Convert.ToDecimal(rdr.GetDouble(11)),
+                Notes           = rdr.IsDBNull(13) ? "" : rdr.GetString(13)
+            };
+        }
+
+        public void DeleteManualInvoice(int id)
+        {
+            using var cn = Open();
+            using var cmd = cn.CreateCommand();
+            cmd.CommandText = "DELETE FROM ManualInvoices WHERE Id = $id;";
             cmd.Parameters.AddWithValue("$id", id);
             cmd.ExecuteNonQuery();
         }

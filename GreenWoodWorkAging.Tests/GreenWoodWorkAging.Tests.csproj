@@ -32,6 +32,7 @@
     <Compile Include="..\Models\SheetCutting.cs" Link="Models\SheetCutting.cs" />
     <Compile Include="..\Models\ImportedSize.cs" Link="Models\ImportedSize.cs" />
     <Compile Include="..\Models\SheetStock.cs" Link="Models\SheetStock.cs" />
+    <Compile Include="..\Models\ManualInvoice.cs" Link="Models\ManualInvoice.cs" />
     <!-- Only the import review window, so its layout can be rendered and looked at. -->
     <Compile Include="..\ImageImportForm.cs" Link="ImageImportForm.cs" />
     <Compile Include="..\Services\AppPaths.cs" Link="Services\AppPaths.cs" />
@@ -42,12 +43,14 @@
     <Compile Include="..\Services\MeasurementInputValidator.cs" Link="Services\MeasurementInputValidator.cs" />
     <Compile Include="..\Services\MeasurementDisplayFormatter.cs" Link="Services\MeasurementDisplayFormatter.cs" />
     <Compile Include="..\Services\BillPdfService.cs" Link="Services\BillPdfService.cs" />
+    <Compile Include="..\Services\ManualInvoicePdfService.cs" Link="Services\ManualInvoicePdfService.cs" />
     <Compile Include="..\Services\SheetCuttingOptimizer.cs" Link="Services\SheetCuttingOptimizer.cs" />
     <Compile Include="..\Services\SheetDiagramRenderer.cs" Link="Services\SheetDiagramRenderer.cs" />
     <Compile Include="..\Services\SheetPlanPdfService.cs" Link="Services\SheetPlanPdfService.cs" />
     <!-- Only the two review windows, so their layout can be rendered and looked at. -->
     <Compile Include="..\SheetOptimizerForm.cs" Link="SheetOptimizerForm.cs" />
     <Compile Include="..\SheetStockForm.cs" Link="SheetStockForm.cs" />
+    <Compile Include="..\ManualInvoiceForm.cs" Link="ManualInvoiceForm.cs" />
     <Compile Include="..\CarpenterMeasurementCalculatorForm.cs" Link="CarpenterMeasurementCalculatorForm.cs" />
     <Compile Include="..\Services\SizeListParser.cs" Link="Services\SizeListParser.cs" />
     <Compile Include="..\Services\ImagePreprocessor.cs" Link="Services\ImagePreprocessor.cs" />

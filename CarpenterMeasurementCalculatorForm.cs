@@ -1483,16 +1483,18 @@ namespace GreenWoodWorkAging
             var card = new Panel { Dock = DockStyle.Fill, BackColor = CCard, Padding = new Padding(20, 8, 20, 8), Margin = new Padding(0, 0, 0, 8) };
             card.Paint += (_, e) => PaintCardBorder(e.Graphics, card);
 
-            var btnOptimize  = BuildOutlineButton("⛁  Optimize",   Point.Empty, 142, 30, CBrown);
-            var btnCsv       = BuildOutlineButton("⬇  Export CSV", Point.Empty, 150, 30, CBlue);
-            var btnInvoice   = BuildOutlineButton("⎙  Invoice",    Point.Empty, 140, 30, CWarn);
-            var btnPdf       = BuildOutlineButton("▤  Save PDF",   Point.Empty, 152, 30, CGreen);
-            var clearAllRows = BuildOutlineButton("✕  Clear All",  Point.Empty, 168, 30, CRed);
-            btnOptimize.Click  += (_, _) => OpenSheetOptimizer();
-            clearAllRows.Click += OnClearAllClicked;
-            btnPdf.Click       += (_, _) => ExportCurrentBillPdf();
-            btnInvoice.Click   += (_, _) => ExportCurrentInvoicePdf();
-            btnCsv.Click       += (_, _) => ExportSizesCsv();
+            var btnOptimize    = BuildOutlineButton("⛁  Optimize",     Point.Empty, 142, 30, CBrown);
+            var btnCsv         = BuildOutlineButton("⬇  Export CSV",   Point.Empty, 150, 30, CBlue);
+            var btnInvoice     = BuildOutlineButton("⎙  Invoice",      Point.Empty, 140, 30, CWarn);
+            var btnInvoiceBill = BuildOutlineButton("✎  Invoice Bill", Point.Empty, 155, 30, Color.FromArgb(13, 148, 136));
+            var btnPdf         = BuildOutlineButton("▤  Save PDF",     Point.Empty, 152, 30, CGreen);
+            var clearAllRows   = BuildOutlineButton("✕  Clear All",    Point.Empty, 168, 30, CRed);
+            btnOptimize.Click    += (_, _) => OpenSheetOptimizer();
+            clearAllRows.Click   += OnClearAllClicked;
+            btnPdf.Click         += (_, _) => ExportCurrentBillPdf();
+            btnInvoice.Click     += (_, _) => ExportCurrentInvoicePdf();
+            btnInvoiceBill.Click += (_, _) => OpenManualInvoice();
+            btnCsv.Click         += (_, _) => ExportSizesCsv();
 
             // Header bar of the grid card. It lives in its own row of the table layout below
             // rather than docking beside the grid: docked siblings share z-order rules that are
@@ -1509,7 +1511,7 @@ namespace GreenWoodWorkAging
             hdrBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             // Sized from the buttons themselves, so display scaling cannot clip them.
             hdrBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,
-                btnOptimize.Width + btnCsv.Width + btnInvoice.Width + btnPdf.Width + clearAllRows.Width + gap * 4 + 12));
+                btnOptimize.Width + btnCsv.Width + btnInvoice.Width + btnInvoiceBill.Width + btnPdf.Width + clearAllRows.Width + gap * 5 + 12));
             hdrBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             var titles = new FlowLayoutPanel
@@ -1531,14 +1533,16 @@ namespace GreenWoodWorkAging
             clearCell.Resize += (_, _) =>
             {
                 int top = Math.Max(0, (clearCell.ClientSize.Height - clearAllRows.Height) / 2);
-                clearAllRows.Location = new Point(Math.Max(0, clearCell.ClientSize.Width - clearAllRows.Width), top);
-                btnPdf.Location       = new Point(Math.Max(0, clearAllRows.Left - gap - btnPdf.Width), top);
-                btnInvoice.Location   = new Point(Math.Max(0, btnPdf.Left - gap - btnInvoice.Width), top);
-                btnCsv.Location       = new Point(Math.Max(0, btnInvoice.Left - gap - btnCsv.Width), top);
-                btnOptimize.Location  = new Point(Math.Max(0, btnCsv.Left - gap - btnOptimize.Width), top);
+                clearAllRows.Location   = new Point(Math.Max(0, clearCell.ClientSize.Width - clearAllRows.Width), top);
+                btnPdf.Location         = new Point(Math.Max(0, clearAllRows.Left - gap - btnPdf.Width), top);
+                btnInvoiceBill.Location = new Point(Math.Max(0, btnPdf.Left - gap - btnInvoiceBill.Width), top);
+                btnInvoice.Location     = new Point(Math.Max(0, btnInvoiceBill.Left - gap - btnInvoice.Width), top);
+                btnCsv.Location         = new Point(Math.Max(0, btnInvoice.Left - gap - btnCsv.Width), top);
+                btnOptimize.Location    = new Point(Math.Max(0, btnCsv.Left - gap - btnOptimize.Width), top);
             };
             clearCell.Controls.Add(clearAllRows);
             clearCell.Controls.Add(btnPdf);
+            clearCell.Controls.Add(btnInvoiceBill);
             clearCell.Controls.Add(btnInvoice);
             clearCell.Controls.Add(btnCsv);
             clearCell.Controls.Add(btnOptimize);
@@ -1602,7 +1606,7 @@ namespace GreenWoodWorkAging
             _railColumn = new ColumnStyle(SizeType.Absolute, 0f);
             body.ColumnStyles.Add(_railColumn);
             body.RowStyles.Add(new RowStyle(SizeType.Absolute,
-                BarHeightFor(btnOptimize, btnCsv, btnInvoice, btnPdf, clearAllRows)));
+                BarHeightFor(btnOptimize, btnCsv, btnInvoice, btnInvoiceBill, btnPdf, clearAllRows)));
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             _tilesRail = BuildTilesRail();
@@ -2738,6 +2742,16 @@ namespace GreenWoodWorkAging
         private void OpenSheetStock()
         {
             using var form = new SheetStockForm(_db, txtCustName.Text.Trim(), txtPhone.Text.Trim(), _currentBillId);
+            form.ShowDialog(this);
+        }
+
+        /// <summary>
+        /// Opens the standalone manual invoice creation dialog. Passes the customer name and phone
+        /// from the main form if already typed in.
+        /// </summary>
+        private void OpenManualInvoice()
+        {
+            using var form = new ManualInvoiceForm(_db, txtCustName.Text.Trim(), txtPhone.Text.Trim());
             form.ShowDialog(this);
         }
 
