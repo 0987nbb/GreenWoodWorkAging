@@ -190,20 +190,27 @@ namespace GreenWoodWorkAging.Services
         /// <summary>The size-by-size list the grid shows, with the grand total on the last bar.</summary>
         private static void MeasurementTable(TableDescriptor table, BillPdfData data, string grandIn, string grandFt)
         {
-            table.ColumnsDefinition(columns =>
+            // The sheet column only appears once sizes are actually grouped by sheet, so a bill
+            // from before that — or one cut from a single material — prints exactly as it did.
+            bool showSheet = data.Rows.Any(m => !string.IsNullOrWhiteSpace(m.SheetCode));
+            uint columns   = 7;
+
+            table.ColumnsDefinition(c =>
             {
-                columns.ConstantColumn(34);              // #
-                columns.RelativeColumn(1.1f);            // Height
-                columns.RelativeColumn(1.1f);            // Width
-                columns.ConstantColumn(44);              // Qty
-                columns.RelativeColumn(1.5f);            // Tape sides
-                columns.RelativeColumn(1.6f);            // Total inches
-                columns.RelativeColumn(1.5f);            // Feet
+                c.ConstantColumn(34);              // #
+                if (showSheet) { c.RelativeColumn(1.3f); columns++; }   // Sheet
+                c.RelativeColumn(1.1f);            // Height
+                c.RelativeColumn(1.1f);            // Width
+                c.ConstantColumn(44);              // Qty
+                c.RelativeColumn(1.5f);            // Tape sides
+                c.RelativeColumn(1.6f);            // Total inches
+                c.RelativeColumn(1.5f);            // Feet
             });
 
             table.Header(header =>
             {
                 HeaderCell(header, "#");
+                if (showSheet) HeaderCell(header, "Sheet");
                 HeaderCell(header, "Height (in)");
                 HeaderCell(header, "Width (in)");
                 HeaderCell(header, "Qty");
@@ -217,6 +224,7 @@ namespace GreenWoodWorkAging.Services
             {
                 var shade = i++ % 2 == 0 ? Paper : RowAlt;
                 RowCell(shade, m.SerialNumber.ToString());
+                if (showSheet) RowCell(shade, m.SheetCode);
                 RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter));
                 RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter));
                 RowCell(shade, m.Quantity.ToString());
@@ -230,7 +238,7 @@ namespace GreenWoodWorkAging.Services
                          .Text(text).FontSize(9).FontColor(Ink);
             }
 
-            table.Cell().ColumnSpan(7).Background(BrandDark).PaddingVertical(9).PaddingHorizontal(10)
+            table.Cell().ColumnSpan(columns).Background(BrandDark).PaddingVertical(9).PaddingHorizontal(10)
                  .Text(t => t.Span($"GRAND TOTAL     {grandIn} in          {grandFt}")
                              .FontSize(9.5f).Bold().FontColor(Paper));
         }

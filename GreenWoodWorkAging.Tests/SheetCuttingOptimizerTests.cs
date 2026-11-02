@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using GreenWoodWorkAging.Models;
 using GreenWoodWorkAging.Services;
@@ -229,6 +230,178 @@ namespace GreenWoodWorkAging
                              .ToList();
 
             Assert.Empty(dead);
+        }
+
+        /// <summary>
+        /// Packed hundreds of ways, the plan must still be physically cuttable: every piece on
+        /// the sheet, none sharing plywood, and never fewer sheets than the bill's own area or
+        /// its busiest size allows. Random sizes are the worst case for a packer, so they are
+        /// what this checks.
+        /// </summary>
+        [Theory]
+        [InlineData(1)]
+        [InlineData(7)]
+        [InlineData(23)]
+        [InlineData(64)]
+        [InlineData(101)]
+        public void RandomBill_PacksLegitimatelyAndNotUnderItsBound(int seed)
+        {
+            var rng  = new Random(seed);
+            var rows = new List<MeasurementEntry>();
+
+            for (int i = 0; i < 1 + rng.Next(8); i++)
+                rows.Add(new MeasurementEntry
+                {
+                    SerialNumber = i + 1,
+                    HeightInches = 6 + rng.Next(86), HeightSooter = rng.Next(8),
+                    WidthInches  = 3 + rng.Next(20), WidthSooter  = rng.Next(8),
+                    Quantity     = 1 + rng.Next(6)
+                });
+
+            var plan = Opt.Optimize(rows);
+
+            foreach (var sheet in plan.Sheets)
+            {
+                Assert.All(sheet.Placements, p =>
+                {
+                    Assert.True(p.X >= 0 && p.Y >= 0);
+                    Assert.True(p.Right <= sheet.SheetWidthEighths);
+                    Assert.True(p.Bottom <= sheet.SheetHeightEighths);
+                });
+
+                foreach (var a in sheet.Placements)
+                    foreach (var b in sheet.Placements)
+                        if (!ReferenceEquals(a, b))
+                            Assert.True(a.X >= b.Right || b.X >= a.Right || a.Y >= b.Bottom || b.Y >= a.Bottom,
+                                $"pieces {a.SerialNumber} and {b.SerialNumber} overlap on sheet {sheet.Number}");
+
+                foreach (var offcut in sheet.Scrap)
+                    Assert.All(sheet.Placements, p =>
+                        Assert.True(offcut.X >= p.Right || p.X >= offcut.X + offcut.WidthEighths ||
+                                    offcut.Y >= p.Bottom || p.Y >= offcut.Y + offcut.HeightEighths));
+
+                Assert.True(sheet.UsedArea + sheet.Scrap.Sum(f => f.Area) <= sheet.SheetArea);
+            }
+
+            Assert.Equal(rows.Sum(r => r.Quantity), plan.PieceCount + plan.Unplaced.Count);
+            Assert.True(plan.Sheets.Count >= SheetsTheBillCouldNotDoWithLess(rows),
+                $"claimed {plan.Sheets.Count} sheets for a bill that needs at least " +
+                $"{SheetsTheBillCouldNotDoWithLess(rows)}");
+        }
+
+        /// <summary>
+        /// The bound a packer can never beat: the bill's area over a sheet, or the sheet's
+        /// capacity for its busiest single size.
+        /// </summary>
+        private static int SheetsTheBillCouldNotDoWithLess(List<MeasurementEntry> rows)
+        {
+            double sheetArea = (double)SheetHeightEighths * SheetWidthEighths;
+            int need = (int)Math.Ceiling(rows.Sum(r => (double)r.HeightEighths * r.WidthEighths * r.Quantity) / sheetArea);
+
+            foreach (var row in rows)
+            {
+                int longest  = Math.Max(row.HeightEighths, row.WidthEighths);
+                int shortest = Math.Min(row.HeightEighths, row.WidthEighths);
+
+                int perSheet = Math.Max(SheetHeightEighths / longest * (SheetWidthEighths / shortest),
+                                        SheetHeightEighths / shortest * (SheetWidthEighths / longest));
+                if (perSheet > 0) need = Math.Max(need, (int)Math.Ceiling(row.Quantity / (double)perSheet));
+            }
+
+            return need;
+        }
+
+        /// <summary>
+        /// The shop waits for this at a counter, so a crowded bill must stay inside a second
+        /// or two even when the search is working through its orders.
+        /// </summary>
+        [Fact]
+        public void CrowdedBill_PacksWithoutHangingTheWindow()
+        {
+            var rows = Enumerable.Range(1, 14)
+                                 .Select(i => Row(i, (8 + i * 6) * 8, (4 + (i * 5) % 22) * 8, 3))
+                                 .ToList();
+
+            var clock = Stopwatch.StartNew();
+            var plan  = Opt.Optimize(rows);
+            clock.Stop();
+
+            Assert.NotEmpty(plan.Sheets);
+            Assert.True(clock.ElapsedMilliseconds < 4000, $"took {clock.ElapsedMilliseconds} ms for {plan.PieceCount} pieces");
+        }
+
+        /// <summary>Two sheet codes, each with the sizes a shop would actually type.</summary>
+        private static List<MeasurementEntry> TwoCodeBill()
+        {
+            var kmi = new[] { Row(1, 89 * 8, 24 * 8, 1), Row(2, 80 * 8, 18 * 8, 1), Row(3, 60 * 8, 6 * 8, 1),
+                              Row(4, 16 * 8 + 2, 10 * 8, 1), Row(5, 36 * 8, 8 * 8, 1), Row(6, 24 * 8, 6 * 8, 2) };
+            var glass = new[] { Row(7, 89 * 8, 24 * 8, 1), Row(8, 44 * 8, 22 * 8, 2), Row(9, 30 * 8, 12 * 8, 3) };
+
+            foreach (var r in kmi)   r.SheetCode = "KMI 123";
+            foreach (var r in glass) r.SheetCode = "Super Glass";
+
+            var rows = kmi.Concat(glass).ToList();
+            return rows;
+        }
+
+        [Fact]
+        public void PiecesOfDifferentSheetCodes_NeverShareASheet()
+        {
+            var plan = Opt.OptimizeBySheetCode(TwoCodeBill());
+
+            foreach (var sheet in plan.Sheets)
+            {
+                var serials = sheet.Placements.Select(p => p.SerialNumber).ToHashSet();
+                var expected = TwoCodeBill().Where(r => serials.Contains(r.SerialNumber))
+                                            .Select(r => r.SheetCode).Distinct().ToList();
+                Assert.Single(expected);
+                Assert.Equal(sheet.Source, expected[0]);
+            }
+        }
+
+        [Fact]
+        public void SheetNumbers_RunStraightOnAcrossTheCodes()
+        {
+            var plan = Opt.OptimizeBySheetCode(TwoCodeBill());
+
+            Assert.Equal(Enumerable.Range(1, plan.Sheets.Count), plan.Sheets.Select(s => s.Number));
+            Assert.Equal(2, plan.Sheets.Select(s => s.Source).Distinct().Count());
+        }
+
+        /// <summary>A bill that never names a sheet packs exactly the way it always did.</summary>
+        [Fact]
+        public void UntypedSheetCodes_PackLikeOnePlan()
+        {
+            var before = Opt.Optimize(SampleBill());
+            var after  = Opt.OptimizeBySheetCode(SampleBill());
+
+            Assert.Equal(before.Sheets.Count, after.Sheets.Count);
+            Assert.Equal(before.PieceCount,   after.PieceCount);
+            Assert.All(after.Sheets, s => Assert.Equal("", s.Source));
+        }
+
+        /// <summary>
+        /// The bill the shop typed and then checked against an online cut-list tool: five sizes,
+        /// eighteen pieces, 1.71 sheets of plywood. Two sheets is what their area needs, and the
+        /// online tool found two, so two is what this packer has to do as well.
+        /// </summary>
+        private static List<MeasurementEntry> TypedBill() => new()
+        {
+            Row(1, 80 * 8,        18 * 8,        2),    // 80    × 18
+            Row(2, 28 * 8 + 4,    17 * 8 + 7,    2),    // 28.4  × 17.7
+            Row(3,  8 * 8,        10 * 8 + 3,    2),    // 8     × 10.3
+            Row(4, 47 * 8 + 4,    15 * 8 + 2,    2),    // 47.4  × 15.2
+            Row(5, 95 * 8,         2 * 8 + 4,   10)     // 95    × 2.4
+        };
+
+        [Fact]
+        public void TypedBill_UsesNoMoreSheetsThanItsAreaNeeds()
+        {
+            var plan = Opt.Optimize(TypedBill());
+
+            Assert.Empty(plan.Unplaced);
+            Assert.Equal(18, plan.PieceCount);
+            Assert.Equal(2, plan.Sheets.Count);
         }
 
         /// <summary>Writes the plan as a picture so the layout can be checked by eye.</summary>

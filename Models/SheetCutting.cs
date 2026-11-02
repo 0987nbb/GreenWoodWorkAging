@@ -47,6 +47,12 @@ namespace GreenWoodWorkAging.Models
         /// <summary>1-based, printed as "Sheet 1", "Sheet 2", …</summary>
         public int Number { get; set; }
 
+        /// <summary>
+        /// The sheet code this sheet is cut from, taken from the measurement rows. Empty when
+        /// the bill never named a sheet, which is how every older bill reads and prints.
+        /// </summary>
+        public string Source { get; set; } = "";
+
         public int SheetWidthEighths { get; set; }
         public int SheetHeightEighths { get; set; }
 

@@ -26,9 +26,10 @@ namespace GreenWoodWorkAging
         private static readonly Font FBtn    = new("Segoe UI", 9.5f, FontStyle.Bold);
 
         // A sheet is 48 × 96 inches, so the picture keeps that 1 : 2 shape. Sized so a whole
-        // card — picture, its sizes beside it — is visible without scrolling.
-        private const int DiagramW = 200;
-        private const int DiagramH = 400;
+        // card — picture, its sizes beside it — is visible without scrolling, and big enough
+        // that the numbers written on the pieces are readable rather than a smear.
+        private const int DiagramW = 248;
+        private const int DiagramH = 496;
         private const int LegendW  = 186;
 
         private readonly MeasurementDisplayFormatter _fmt = new();
@@ -44,7 +45,7 @@ namespace GreenWoodWorkAging
                                                                 : $"Sheet cutting plan — {customer}";
             BackColor     = CBg;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize    = new Size(1120, 640);
+            ClientSize    = new Size(1180, 800);
             MinimumSize   = new Size(720, 520);
             Font          = new Font("Segoe UI", 9f);
             AppIcon.Apply(this);
@@ -58,10 +59,12 @@ namespace GreenWoodWorkAging
                 Padding     = new Padding(18, 14, 18, 14)
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104f));
+
+            var header = BuildHeader(plan);
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, header.Height));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            root.Controls.Add(BuildHeader(plan), 0, 0);
+            root.Controls.Add(header, 0, 0);
             root.Controls.Add(BuildSheets(plan), 0, 1);
 
             Controls.Add(root);
@@ -78,20 +81,43 @@ namespace GreenWoodWorkAging
                                $"{_fmt.FormatCompactFromEighths(plan.SheetWidthEighths)} in " +
                                $"(8 ft × 4 ft)";
 
-            var title = new Label
-            {
-                Text      = "⛁  Sheet cutting plan",
-                Font      = FTitle,
-                ForeColor = CText,
-                AutoSize  = true,
-                Location  = new Point(14, 10)
-            };
+            string titleText = "⛁  Sheet cutting plan";
 
             string summary = plan.Sheets.Count == 0
                 ? "Nothing to cut — add the sizes on the bill first."
                 : $"{plan.Sheets.Count} sheet{(plan.Sheets.Count == 1 ? "" : "s")} of {sheetSize}   ·   " +
                   $"{plan.PieceCount} pieces   ·   {plan.OverallUsedPercent:0.#}% of the plywood used" +
                   "   ·   dashed = unused";
+
+            // When the bill named its sheets, say how the plan is split between them.
+            var bySource = plan.Sheets
+                               .GroupBy(s => s.Source)
+                               .Where(g => g.Key.Length > 0)
+                               .ToList();
+            if (bySource.Count > 1)
+                summary += "\n" + string.Join("   ·   ", bySource.Select(g =>
+                    $"{g.Key}: {g.Count()} sheet{(g.Count() == 1 ? "" : "s")} (no. {g.Min(s => s.Number)}–{g.Max(s => s.Number)})"));
+
+            // The card is as tall as the text it has to hold: the title line, the summary —
+            // two lines once the plan is split across materials — and the oversized-piece note.
+            int titleH       = Math.Max(30, Measure(titleText, FTitle).Height + 6);
+            int lineH        = Math.Max(22, Measure("0", FLine).Height + 6);
+            int metaH        = Math.Max(20, Measure("0", FMeta).Height + 6);
+            int summaryLines = bySource.Count > 1 ? 2 : 1;
+
+            int titleY  = 10;
+            int lineY   = titleY + titleH + 4;
+            int warnY   = lineY + summaryLines * lineH + 2;
+            card.Height = warnY + (plan.Unplaced.Count > 0 ? metaH + 2 : 0) + 12;
+
+            var title = new Label
+            {
+                Text      = titleText,
+                Font      = FTitle,
+                ForeColor = CText,
+                AutoSize  = true,
+                Location  = new Point(14, titleY)
+            };
 
             var line = new Label
             {
@@ -100,7 +126,7 @@ namespace GreenWoodWorkAging
                 ForeColor   = plan.Sheets.Count == 0 ? CSub : CGreen,
                 AutoSize    = true,
                 MaximumSize = new Size(700, 0),
-                Location    = new Point(16, 42)
+                Location    = new Point(16, lineY)
             };
 
             var savePdf = BuildButton("⬇  Save PDF", CGreen);
@@ -132,7 +158,7 @@ namespace GreenWoodWorkAging
                     ForeColor    = CRed,
                     AutoSize     = true,
                     MaximumSize  = new Size(820, 0),
-                    Location     = new Point(16, 64)
+                    Location     = new Point(16, warnY)
                 };
                 card.Controls.Add(warn);
             }
@@ -183,35 +209,47 @@ namespace GreenWoodWorkAging
         private Control BuildSheetCard(SheetLayout sheet)
         {
             int cardW = DiagramW + LegendW + 40;
-            int cardH = DiagramH + 52;
+
+            string headingText = $"Sheet {sheet.Number}" +
+                                 (string.IsNullOrWhiteSpace(sheet.Source) ? "" : $"  ·  {sheet.Source}");
+            string usedText    = $"{sheet.Placements.Count} pieces · {sheet.UsedPercent:0.#}% used";
+
+            // Both halves of the heading are measured. A fixed 18 px row shaves the bottom off
+            // "Sheet 1", and a label allowed only half the card hides the material code the
+            // plan was grouped by — which is the one thing the shop needs to see here.
+            int headingH = Math.Max(24, Measure(headingText, FSheet).Height + 6);
+            int usedW    = Math.Min(cardW - 60, Measure(usedText, FMeta).Width + 8);
+            int cardH    = DiagramH + headingH + 20;
 
             var card = new Panel { Size = new Size(cardW, cardH), Margin = new Padding(10), BackColor = CCard };
             card.Paint += (_, e) => PaintBorder(e.Graphics, card);
 
-            // "Sheet 3" on the left, its usage pinned to the right edge of the card. The label
-            // spans the card rather than half of it, otherwise the trailing "% used" is clipped.
             var heading = new Label
             {
-                Text      = $"Sheet {sheet.Number}",
-                Font      = FSheet,
-                ForeColor = CText,
-                Size      = new Size(96, 18),
-                Location  = new Point(12, 8)
+                Text         = headingText,
+                Font         = FSheet,
+                ForeColor    = CText,
+                AutoEllipsis = true,
+                Size         = new Size(cardW - 24 - usedW - 10, headingH),
+                Location     = new Point(12, 6),
+                TextAlign    = ContentAlignment.BottomLeft
             };
 
             var used = new Label
             {
-                Text      = $"{sheet.Placements.Count} pieces · {sheet.UsedPercent:0.#}% used",
+                Text      = usedText,
                 Font      = FMeta,
                 ForeColor = sheet.UsedPercent >= 80 ? CGreen : CSub,
-                TextAlign = ContentAlignment.TopRight,
-                Size      = new Size(cardW - 24, 18),
-                Location  = new Point(12, 11)
+                TextAlign = ContentAlignment.BottomRight,
+                Size      = new Size(usedW, headingH),
+                Location  = new Point(cardW - 12 - usedW, 6)
             };
+
+            int diagramTop = 6 + headingH + 8;
 
             var diagram = new SheetDiagram(sheet)
             {
-                Location = new Point(12, 32),
+                Location = new Point(12, diagramTop),
                 Size     = new Size(DiagramW, DiagramH)
             };
 
@@ -222,7 +260,7 @@ namespace GreenWoodWorkAging
                 ForeColor     = CText,
                 AutoSize      = false,
                 Size          = new Size(LegendW, DiagramH),
-                Location      = new Point(12 + DiagramW + 16, 34)
+                Location      = new Point(12 + DiagramW + 16, diagramTop + 2)
             };
 
             card.Controls.Add(heading);
@@ -231,6 +269,10 @@ namespace GreenWoodWorkAging
             card.Controls.Add(legend);
             return card;
         }
+
+        /// <summary>How wide a line of this text really is, so nothing is cut off by a fixed box.</summary>
+        private static Size Measure(string text, Font font) =>
+            TextRenderer.MeasureText(text, font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
 
         /// <summary>
         /// Every size on the sheet, listed beside the picture. A 3-inch strip of plywood is a

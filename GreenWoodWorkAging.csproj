@@ -10,7 +10,7 @@
     <!-- Branding, and the version the installer is built from. -->
     <Product>Green Wood Works</Product>
     <AssemblyTitle>Green Wood Works — Carpenter Measurement Calculator</AssemblyTitle>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
 
     <!-- The shop only ever runs in English; the desktop runtime ships ~20 other locales. -->

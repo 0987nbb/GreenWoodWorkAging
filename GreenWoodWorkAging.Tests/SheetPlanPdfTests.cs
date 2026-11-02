@@ -51,6 +51,55 @@ namespace GreenWoodWorkAging
             Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
         }
 
+        /// <summary>
+        /// A piece bigger than a whole sheet cannot be cut, so the plan prints a note about it.
+        /// The note used to begin with ⚠, which the PDF font has no picture of — QuestPDF then
+        /// refused to make the file at all, so this is the crash the shop hit, kept as a test.
+        /// </summary>
+        [Fact]
+        public void Generate_WithAPieceTooLargeForASheet_WritesTheNoteAndThePdf()
+        {
+            var rows = CrowdedBill().Concat(new[] { Row(9, 100, 0, 50, 0, 1) }).ToList();
+            var plan = new SheetCuttingOptimizer().Optimize(rows);
+            Assert.NotEmpty(plan.Unplaced);
+
+            string path = Path.Combine(Path.GetTempPath(), "gwa-plan-unplaced.pdf");
+            SheetPlanPdfService.Generate(path, plan, "Naveed Formely", new DateTime(2026, 10, 31), Logo());
+
+            var bytes = File.ReadAllBytes(path);
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+
+            string dir = Path.Combine(Path.GetTempPath(), "gwa-pdf", DateTime.Now.ToString("HHmmssff"));
+            Directory.CreateDirectory(dir);
+            SheetPlanPdfService.Build(plan, "Naveed Formely", new DateTime(2026, 10, 31), Logo())
+                               .GenerateImages(p => Path.Combine(dir, $"note{p}.png"),
+                                   new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+            Assert.True(File.Exists(Path.Combine(dir, "note0.png")));
+        }
+
+        /// <summary>Two codes on one bill: the printed plan has to say which sheets are which.</summary>
+        [Fact]
+        public void Generate_WithTwoSheetCodes_NamesTheCodeOnEverySheet()
+        {
+            var rows = CrowdedBill();
+            rows[0].SheetCode = "KMI 123";
+            rows[1].SheetCode = "KMI 123";
+            rows[2].SheetCode = "Super Glass";
+            rows[3].SheetCode = "Super Glass";
+
+            var plan = new SheetCuttingOptimizer().OptimizeBySheetCode(rows);
+            Assert.NotEmpty(plan.Sheets);
+
+            string dir = Path.Combine(Path.GetTempPath(), "gwa-pdf", DateTime.Now.ToString("HHmmssff"));
+            Directory.CreateDirectory(dir);
+
+            SheetPlanPdfService.Build(plan, "Naveed Formely", new DateTime(2026, 10, 31), Logo())
+                               .GenerateImages(p => Path.Combine(dir, $"codes{p}.png"),
+                                   new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+
+            Assert.True(File.Exists(Path.Combine(dir, "codes0.png")));
+        }
+
         /// <summary>Page pictures, so the printed plan can be judged the way the shop will see it.</summary>
         [Fact]
         public void Generate_RendersPagePreviews()
@@ -70,7 +119,11 @@ namespace GreenWoodWorkAging
         [Fact]
         public void ThePlanWindow_DrawsWithACrowdedBill()
         {
-            var plan = new SheetCuttingOptimizer().Optimize(CrowdedBill());
+            // Two materials, so the sheet headings carry a code name the way the shop reads them.
+            var rows = CrowdedBill();
+            foreach (var r in rows) r.SheetCode = r.Quantity == 10 ? "Super Glass" : "KMI 123";
+            var plan = new SheetCuttingOptimizer().OptimizeBySheetCode(rows);
+
             string dir = Path.Combine(Path.GetTempPath(), "gwa-sheets");
             Directory.CreateDirectory(dir);
 
@@ -80,7 +133,7 @@ namespace GreenWoodWorkAging
                 try
                 {
                     using var form = new SheetOptimizerForm(plan, "Muhammad Tariq");
-                    form.Size = new System.Drawing.Size(1120, 640);
+                    form.ClientSize = new System.Drawing.Size(1180, 800);
 
                     // A form that has never been shown paints nothing but its own background.
                     form.Show();

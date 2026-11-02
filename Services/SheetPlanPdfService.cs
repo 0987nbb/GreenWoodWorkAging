@@ -37,6 +37,13 @@ namespace GreenWoodWorkAging.Services
         {
             QuestPDF.Settings.License = LicenseType.Community;
 
+            // Which sheet numbers belong to which material, for the meta box and the intro line.
+            var bySource = plan.Sheets
+                               .GroupBy(s => s.Source)
+                               .Where(g => g.Key.Length > 0)
+                               .OrderBy(g => g.Min(s => s.Number))
+                               .ToList();
+
             return Document.Create(container =>
             {
                 container.Page(page =>
@@ -70,6 +77,9 @@ namespace GreenWoodWorkAging.Services
                                 MetaRow("Customer", string.IsNullOrWhiteSpace(customer) ? "—" : customer);
                                 MetaRow("Date",    date.ToString("dd MMM yyyy"));
                                 MetaRow("Sheets",  $"{plan.Sheets.Count} × 8 ft × 4 ft");
+                                if (bySource.Count > 0)
+                                    MetaRow("From", bySource.Count == 1 ? bySource[0].Key
+                                                                        : $"{bySource.Count} sheet codes");
 
                                 void MetaRow(string caption, string value) => meta.Item().PaddingTop(3).Row(r =>
                                 {
@@ -88,10 +98,26 @@ namespace GreenWoodWorkAging.Services
                             t.Span($"{plan.OverallUsedPercent:0.#}% of the plywood used").FontSize(9.5f).FontColor(BrandDark);
                         });
 
+                        // A bill cut from several materials lists which sheets are which, so the
+                        // carpenter never has to work it out from the sizes.
+                        if (bySource.Count > 1)
+                        {
+                            string split = string.Join("     ", bySource.Select(g =>
+                            {
+                                int first = g.Min(s => s.Number);
+                                int last  = g.Max(s => s.Number);
+                                return $"{g.Key}: sheet{(g.Count() == 1 ? "" : "s")} " +
+                                       (first == last ? first.ToString() : $"{first}–{last}");
+                            }));
+                            col.Item().PaddingTop(6).Text(split).FontSize(8.5f).Bold().FontColor(BrandDark);
+                        }
+
                         if (plan.Unplaced.Count > 0)
+                            // No ⚠ here: the PDF font (Lato) has no such glyph and QuestPDF 2026.9
+                            // refuses to draw text it cannot render.
                             col.Item().PaddingTop(6).Text(
-                                $"⚠  {plan.Unplaced.Count} piece(s) are larger than one sheet and are not on this plan.")
-                               .FontSize(8.5f).FontColor(PdfColor.FromHex("#B32828"));
+                                $"NOTE: {plan.Unplaced.Count} piece(s) are larger than one sheet and are not on this plan.")
+                               .FontSize(8.5f).Bold().FontColor(PdfColor.FromHex("#B32828"));
 
                         foreach (var sheet in plan.Sheets)
                             col.Item().PaddingTop(16).PreventPageBreak().Row(row => Sheet(row, sheet));
@@ -133,6 +159,8 @@ namespace GreenWoodWorkAging.Services
                 col.Item().Background(BrandDark).PaddingVertical(7).PaddingHorizontal(10).Text(t =>
                 {
                     t.Span($"Sheet {sheet.Number}").FontSize(10).Bold().FontColor(Paper);
+                    if (!string.IsNullOrWhiteSpace(sheet.Source))
+                        t.Span($"   {sheet.Source}").FontSize(10).Bold().FontColor(PdfColor.FromHex("#BFE3CE"));
                     t.Span($"      {sheet.Placements.Count} pieces · {sheet.UsedPercent:0.#}% used")
                      .FontSize(8.5f).FontColor(Paper);
                 });

@@ -14,6 +14,9 @@ namespace GreenWoodWorkAging
     ///   • Search by name or phone, open old bills, print
     ///   • Single "X Inch Y Sooter" label in grid + bill
     ///   • Sooter NUD hard-limited to 0–7
+    ///
+    /// Every icon here is a BMP symbol: Segoe UI has no glyphs for astral emoji, so they
+    /// draw as empty boxes on screen and throw when a PDF is built.
     /// </summary>
     public class CarpenterMeasurementCalculatorForm : Form
     {
@@ -43,6 +46,9 @@ namespace GreenWoodWorkAging
         private TextBox        txtHeight = null!;  // "79.7" format (79 inches + 7 sooter)
         private TextBox        txtWidth  = null!;  // "48.3" format (48 inches + 3 sooter)
         private NumericUpDown  nudQuantity     = null!;
+
+        /// <summary>The sheet every size added below it is cut from. Sticky across adds.</summary>
+        private TextBox        txtSheetCode    = null!;
         private ComboBox       _cmbSides      = null!;  // 1/2/3/4 tape-edge selection
         private Label          lblError        = null!;
         private Button         btnAdd          = null!;
@@ -55,6 +61,16 @@ namespace GreenWoodWorkAging
         private Label          lblGrandSub     = null!;
         private Label          lblFeet         = null!;
         private Label          lblFeetSub      = null!;
+
+        // ── Totals tiles ──────────────────────────────────────────────────────
+        // The same four tiles live in one of two hosts: the rail beside the grid when the
+        // window is wide enough for both, or the band under it when it is not.
+        private TableLayoutPanel _tilesBand = null!;
+        private TableLayoutPanel _tilesRail = null!;
+        private readonly Panel[] _tiles     = new Panel[4];
+        private RowStyle       _bandRow     = null!;
+        private ColumnStyle    _railColumn  = null!;
+        private bool           _tilesInRail;
 
         // ── Controls — bill charges (money) ───────────────────────────────────
         private NumericUpDown nudRateFoot   = null!;
@@ -96,6 +112,7 @@ namespace GreenWoodWorkAging
         private static readonly Color CGreenDark    = Color.FromArgb(22, 108, 65);
         private static readonly Color CGreenLight   = Color.FromArgb(236, 252, 243);
         private static readonly Color CBrown        = Color.FromArgb(181, 114, 46);
+        private static readonly Color CBrownDark    = Color.FromArgb(140, 86, 32);
         private static readonly Color CBrownLight   = Color.FromArgb(255, 246, 235);
         private static readonly Color CBlue         = Color.FromArgb(37, 99, 180);
         private static readonly Color CBlueLight    = Color.FromArgb(235, 243, 255);
@@ -261,12 +278,12 @@ namespace GreenWoodWorkAging
             p.Controls.Add(sep);
 
             // Calculator (always active)
-            var calc = BuildNavItem("🧮", "Measurement Calc", true,  null);
+            var calc = BuildNavItem("⌗", "Measurement Calc", true,  null);
             calc.SetBounds(0, 7, 232, 42);
             p.Controls.Add(calc);
 
             // Bill History (toggle)
-            var hist = BuildNavItem("📋", "Bill History",     false, ToggleHistory);
+            var hist = BuildNavItem("☰", "Bill History",     false, ToggleHistory);
             hist.SetBounds(0, 51, 232, 42);
             p.Controls.Add(hist);
 
@@ -318,7 +335,7 @@ namespace GreenWoodWorkAging
             // Title bar
             var title = new Label
             {
-                Text      = "  📋  Bill History",
+                Text      = "  ☰  Bill History",
                 Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Dock      = DockStyle.Top,
@@ -361,17 +378,17 @@ namespace GreenWoodWorkAging
             // Action buttons
             var btnRow = new Panel { Dock = DockStyle.Bottom, Height = 32, BackColor = Color.FromArgb(18, 32, 22) };
 
-            var btnOpen = MakeSideBtn("📂 Open", 74);
+            var btnOpen = MakeSideBtn("⧉ Open", 74);
             btnOpen.Dock  = DockStyle.Left;
             btnOpen.Click += (_, _) => OpenSelectedBill();
             btnRow.Controls.Add(btnOpen);
 
-            var btnPrint = MakeSideBtn("🖨 Print", 74);
+            var btnPrint = MakeSideBtn("⎙ Print", 74);
             btnPrint.Dock  = DockStyle.Left;
             btnPrint.Click += (_, _) => PrintSelectedBill();
             btnRow.Controls.Add(btnPrint);
 
-            var btnDel = MakeSideBtn("🗑 Del", 74);
+            var btnDel = MakeSideBtn("✕ Del", 74);
             btnDel.Dock  = DockStyle.Right;
             btnDel.Click += (_, _) => DeleteSelectedBill();
             btnRow.Controls.Add(btnDel);
@@ -395,7 +412,7 @@ namespace GreenWoodWorkAging
             string line1 = $"  {bill.CustomerName}";
             string line2 = $"  {bill.BillDate:dd MMM yyyy}";
             if (!string.IsNullOrWhiteSpace(bill.PhoneNumber))
-                line2 += $"   📞 {bill.PhoneNumber}";
+                line2 += $"   ☎ {bill.PhoneNumber}";
             string line3 = $"  {bill.MeasCount} measurement(s)";
 
             var fBold = new Font("Segoe UI", 9f, FontStyle.Bold);
@@ -410,7 +427,7 @@ namespace GreenWoodWorkAging
         private Panel BuildSideFooter()
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(18, 32, 24), Padding = new Padding(16, 8, 16, 8) };
-            p.Controls.Add(new Label { Text = "🌿  Quality Woodwork\n      Lasts a Lifetime", Font = new Font("Segoe UI", 8.5f, FontStyle.Italic), ForeColor = SidebarText, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+            p.Controls.Add(new Label { Text = "✿  Quality Woodwork\n      Lasts a Lifetime", Font = new Font("Segoe UI", 8.5f, FontStyle.Italic), ForeColor = SidebarText, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
             return p;
         }
 
@@ -437,23 +454,27 @@ namespace GreenWoodWorkAging
             var tbl = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
-                ColumnCount = 6,
+                ColumnCount = 7,
                 RowCount    = 1,
                 BackColor   = CCard,
                 Padding     = new Padding(20, 10, 20, 10)
             };
+            var headerBtnFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));   // icon
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  100f));  // title (flexes)
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 286f));  // search
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96f));   // New
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96f));   // All
+            // Wide enough for the longest label at any text scaling, so nothing is clipped.
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,
+                Math.Max(150, MeasureText("▦  Customers Sheets", headerBtnFont).Width + 30)));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170f));  // clock
             tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             h.Controls.Add(tbl);
 
             tbl.Controls.Add(new Label
             {
-                Text      = "🧮",
+                Text      = "⌗",
                 Font      = new Font("Segoe UI", 22f),
                 Dock      = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -503,7 +524,7 @@ namespace GreenWoodWorkAging
                 Font            = new Font("Segoe UI", 10.5f),
                 BorderStyle     = BorderStyle.FixedSingle,
                 BackColor       = Color.FromArgb(250, 252, 254),
-                PlaceholderText = "🔍 Search name, phone or date..."
+                PlaceholderText = "⌕ Search name, phone or date..."
             };
             txtDashSearch.Enter += (_, _) => txtDashSearch.BackColor = Color.FromArgb(235, 250, 242);
             txtDashSearch.Leave += (_, _) =>
@@ -555,7 +576,7 @@ namespace GreenWoodWorkAging
             // All Customers
             var btnAll = new Button
             {
-                Text      = "📋 All",
+                Text      = "☰ All",
                 Size      = new Size(84, 38),
                 Anchor    = AnchorStyles.None,
                 Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
@@ -570,6 +591,25 @@ namespace GreenWoodWorkAging
             btnAll.Click += (_, _) => ShowAllCustomers();
             tbl.Controls.Add(btnAll, 4, 0);
 
+            // The sheets a customer has left with the shop, kept beside the bill they came with.
+            var btnSheetStock = new Button
+            {
+                Text      = "▦  Customers Sheets",
+                AutoSize  = false,
+                Size      = new Size(Math.Max(150, MeasureText("▦  Customers Sheets", headerBtnFont).Width + 30) - 12, 38),
+                Anchor    = AnchorStyles.None,
+                Font      = headerBtnFont,
+                BackColor = CBrown,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor    = Cursors.Hand
+            };
+            btnSheetStock.FlatAppearance.BorderSize = 0;
+            btnSheetStock.MouseEnter += (_, _) => btnSheetStock.BackColor = CBrownDark;
+            btnSheetStock.MouseLeave += (_, _) => btnSheetStock.BackColor = CBrown;
+            btnSheetStock.Click += (_, _) => OpenSheetStock();
+            tbl.Controls.Add(btnSheetStock, 5, 0);
+
             // Clock
             lblClock = new Label
             {
@@ -581,7 +621,7 @@ namespace GreenWoodWorkAging
                 BackColor = CCard
             };
             UpdateClock();
-            tbl.Controls.Add(lblClock, 5, 0);
+            tbl.Controls.Add(lblClock, 6, 0);
 
             // Search results dropdown — parented to the form so it is never clipped
             // by the 78 px header panel it visually hangs out of.
@@ -616,10 +656,15 @@ namespace GreenWoodWorkAging
         /// <summary>Customer details strip — sits between header and body.</summary>
         private Panel BuildCustomerStrip()
         {
+            // Caption, box and the strip's own padding: a hand-picked 86 px only fits at 100%
+            // scaling, and above it the captions lose their bottoms to the boxes below.
+            int tallest = Math.Max(StripCaptionHeight("✎ Customer Name *"),
+                                   Math.Max(StripCaptionHeight("◷ Date *"), StripCaptionHeight("☎ Phone (optional)")));
+
             var strip = new Panel
             {
                 Dock      = DockStyle.Top,
-                Height    = 86,
+                Height    = Math.Max(86, tallest + StripInputHeight() + 22),
                 BackColor = CCard,
                 Padding   = new Padding(24, 10, 24, 10)
             };
@@ -647,15 +692,15 @@ namespace GreenWoodWorkAging
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240f)); // status
 
             // Name
-            tbl.Controls.Add(BuildCustField("👤 Customer Name *", out txtCustName), 0, 0);
+            tbl.Controls.Add(BuildCustField("✎ Customer Name *", out txtCustName), 0, 0);
 
             // Date
-            var datePnl = BuildFieldShell();
-            datePnl.Controls.Add(BuildFieldLabel("📅 Date *"), 0, 0);
+            var datePnl = BuildFieldShell("◷ Date *");
+            datePnl.Controls.Add(BuildFieldLabel("◷ Date *"), 0, 0);
             dtpBillDate = new DateTimePicker
             {
                 Dock     = DockStyle.Bottom,
-                Height   = 30,
+                Height   = StripInputHeight(),
                 Font     = FCustInput,
                 Format   = DateTimePickerFormat.Short,
                 Value    = DateTime.Today
@@ -665,7 +710,7 @@ namespace GreenWoodWorkAging
             tbl.Controls.Add(datePnl, 1, 0);
 
             // Phone
-            tbl.Controls.Add(BuildCustField("📞 Phone (optional)", out txtPhone), 2, 0);
+            tbl.Controls.Add(BuildCustField("☎ Phone (optional)", out txtPhone), 2, 0);
 
             // Save Status
             var statusPnl = new Panel { Dock = DockStyle.Fill, BackColor = CCard, Padding = new Padding(12, 18, 8, 6) };
@@ -690,7 +735,7 @@ namespace GreenWoodWorkAging
         }
 
         /// <summary>Two-row shell (caption on top, control filling the rest) used by the customer strip.</summary>
-        private static TableLayoutPanel BuildFieldShell()
+        private static TableLayoutPanel BuildFieldShell(string caption)
         {
             var p = new TableLayoutPanel
             {
@@ -698,12 +743,21 @@ namespace GreenWoodWorkAging
                 ColumnCount = 1,
                 RowCount    = 2,
                 BackColor   = CCard,
-                Padding     = new Padding(0, 4, 14, 4)
+                Padding     = new Padding(0, 4, 14, 6)
             };
-            p.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            p.RowStyles.Add(new RowStyle(SizeType.Absolute, StripCaptionHeight(caption)));
             p.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));
             return p;
         }
+
+        /// <summary>
+        /// The strip's caption row, measured with the slack GDI adds around drawn text — the
+        /// same line a label paints, not the tighter box a measurement returns.
+        /// </summary>
+        private static int StripCaptionHeight(string caption) => Math.Max(24, MeasureText(caption, FCustLabel).Height + 8);
+
+        /// <summary>A box on the customer strip, tall enough for the text it holds.</summary>
+        private static int StripInputHeight() => Math.Max(32, MeasureText("0", FCustInput).Height + 12);
 
         private static Label BuildFieldLabel(string text) => new()
         {
@@ -717,12 +771,12 @@ namespace GreenWoodWorkAging
 
         private Panel BuildCustField(string label, out TextBox tb, string placeholder = "")
         {
-            var p = BuildFieldShell();
+            var p = BuildFieldShell(label);
             p.Controls.Add(BuildFieldLabel(label), 0, 0);
             var box = new TextBox
             {
                 Dock            = DockStyle.Bottom,
-                Height          = 30,
+                Height          = StripInputHeight(),
                 Font            = FCustInput,
                 BorderStyle     = BorderStyle.FixedSingle,
                 BackColor       = Color.FromArgb(250, 252, 254),
@@ -754,7 +808,8 @@ namespace GreenWoodWorkAging
             var chargesCard = BuildChargesCard();
             tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, _inputCardHeight));   // input card
             tbl.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));                // grid
-            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, _summaryRowHeight));   // summary
+            _bandRow = new RowStyle(SizeType.Absolute, _summaryRowHeight);          // summary
+            tbl.RowStyles.Add(_bandRow);
             tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, _chargesCardHeight));  // charges
 
             tbl.Controls.Add(inputCard,          0, 0);
@@ -846,8 +901,8 @@ namespace GreenWoodWorkAging
             var fBold = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             var fNorm = new Font("Segoe UI", 8.5f);
             string name = $"  {bill.CustomerName}";
-            string meta = $"  📅 {bill.BillDate:dd MMM yyyy}";
-            if (!string.IsNullOrWhiteSpace(bill.PhoneNumber)) meta += $"   📞 {bill.PhoneNumber}";
+            string meta = $"  ◷ {bill.BillDate:dd MMM yyyy}";
+            if (!string.IsNullOrWhiteSpace(bill.PhoneNumber)) meta += $"   ☎ {bill.PhoneNumber}";
             meta += $"   ({bill.MeasCount} meas.)";
             TextRenderer.DrawText(e.Graphics, name, fBold, new Rectangle(e.Bounds.X + 8, e.Bounds.Y + 3,  e.Bounds.Width, 18), sel ? CGreenDark : CText, TextFormatFlags.Left);
             TextRenderer.DrawText(e.Graphics, meta, fNorm, new Rectangle(e.Bounds.X + 8, e.Bounds.Y + 20, e.Bounds.Width, 16), sel ? CGreenDark : CSub,  TextFormatFlags.Left);
@@ -981,7 +1036,7 @@ namespace GreenWoodWorkAging
                 Height = 38,
                 Anchor = AnchorStyles.None,
                 Font = new Font("Segoe UI", 10f),
-                PlaceholderText = "🔍 Search by name, phone or date...",
+                PlaceholderText = "⌕ Search by name, phone or date...",
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(250, 252, 254)
             };
@@ -1187,17 +1242,22 @@ namespace GreenWoodWorkAging
             // enough for it: whatever the caption and the input need side by side.
             int fieldsHeight = CaptionHeight("↕  Height (in.sooter)") + InputHeight(FInput);
 
+            // The sheet line is shaped like any other field group — a caption over its box — and
+            // sits above the sizes, because it decides what every size entered below it means.
+            int sheetRow = fieldsHeight;
+
             var layout = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 3,
+                RowCount    = 4,
                 BackColor   = CCard,
                 Padding     = new Padding(24, 14, 24, 8)
             };
-            _inputCardHeight = Math.Max(144, layout.Padding.Vertical + titleRow + fieldsHeight + errorRow + card.Margin.Bottom);
+            _inputCardHeight = Math.Max(144, layout.Padding.Vertical + titleRow + sheetRow + fieldsHeight + errorRow + card.Margin.Bottom);
 
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, titleRow));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, sheetRow));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, errorRow));
             card.Controls.Add(layout);
@@ -1219,6 +1279,40 @@ namespace GreenWoodWorkAging
             titleBar.Controls.Add(btnImportImages, 1, 0);
             layout.Controls.Add(titleBar, 0, 0);
 
+            // Each column is grown from the caption that sits in it — at 150% scaling
+            // "↕  Height (in.sooter)" no longer fits a 210 px box — plus the gap the field
+            // group keeps on its right.
+            int ColumnFor(string caption, int minWidth, int rightGap) =>
+                Math.Max(minWidth, MeasureText(caption, FFieldLabel).Width + 6 + rightGap);
+
+            // The sheet line, above the sizes: whatever is typed here is the sheet every size
+            // added underneath is cut from, until it is changed. It keeps its text through an
+            // add so a whole batch can be entered against one sheet.
+            string sheetCaption = "▦  Sheet / material code";
+            var sheetBar = new TableLayoutPanel
+            {
+                Dock        = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount    = 1,
+                BackColor   = CCard,
+                Margin      = new Padding(0)
+            };
+            sheetBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            sheetBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ColumnFor(sheetCaption, 240, 16)));
+            sheetBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            txtSheetCode = BuildTextEntry(Point.Empty, 220, InputHeight(FInput), 24);
+            sheetBar.Controls.Add(BuildFieldGroup(sheetCaption, txtSheetCode, 16), 0, 0);
+            sheetBar.Controls.Add(new Label
+            {
+                Text      = "all sizes added below are cut from this sheet — change it to start the next one",
+                Font      = FFieldSub,
+                ForeColor = CSub,
+                AutoSize  = false,
+                Dock      = DockStyle.Fill,
+                TextAlign = ContentAlignment.BottomLeft
+            }, 1, 0);
+            layout.Controls.Add(sheetBar, 0, 1);
+
             var fieldsRow = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
@@ -1230,12 +1324,7 @@ namespace GreenWoodWorkAging
             fieldsRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             // Left-packed run: Height → Width → Qty → Tape sides → Add, with the spare card
             // width going to the filler on the right so the Add button never drifts away from
-            // the inputs on a wide window. Each column is grown from the caption that sits in
-            // it — at 150% scaling "↕  Height (in.sooter)" no longer fits a 210 px box — plus
-            // the gap the field group keeps on its right.
-            int ColumnFor(string caption, int minWidth, int rightGap) =>
-                Math.Max(minWidth, MeasureText(caption, FFieldLabel).Width + 6 + rightGap);
-
+            // the inputs on a wide window.
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ColumnFor("↕  Height (in.sooter)", 210, 12)));
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ColumnFor("↔  Width (in.sooter)",  210, 12)));
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ColumnFor("Qty",                   120, 12)));
@@ -1243,7 +1332,7 @@ namespace GreenWoodWorkAging
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Math.Max(150, MeasureText("＋  Add",    FBtn).Width + 30 + 10)));
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Math.Max(130, MeasureText("✕  Cancel", FBtn).Width + 30)));
             fieldsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  100f));  // filler
-            layout.Controls.Add(fieldsRow, 0, 1);
+            layout.Controls.Add(fieldsRow, 0, 2);
 
             txtHeight = BuildTextBox(Point.Empty, 190, 38);
             txtWidth  = BuildTextBox(Point.Empty, 190, 38);
@@ -1288,9 +1377,17 @@ namespace GreenWoodWorkAging
             fieldsRow.Controls.Add(BuildFieldGroup("", btnCancel, 0), 5, 0);
 
             lblError = new Label { AutoSize = false, Dock = DockStyle.Fill, Font = errFont, ForeColor = CRed, Text = "", TextAlign = ContentAlignment.MiddleLeft };
-            layout.Controls.Add(lblError, 0, 2);
+            layout.Controls.Add(lblError, 0, 3);
 
             void Wire(Control c) => c.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; OnAddClicked(this, EventArgs.Empty); } };
+            // The sheet box comes first in the flow, so Enter there hands over to Height
+            // instead of adding an empty row.
+            txtSheetCode.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                txtHeight.Focus();
+            };
             Wire(txtHeight);
             Wire(txtWidth);
             Wire(nudQuantity);
@@ -1327,8 +1424,12 @@ namespace GreenWoodWorkAging
             return p;
         }
 
-        /// <summary>The line a field caption needs, plus room to breathe under it.</summary>
-        private static int CaptionHeight(string caption) => Math.Max(22, MeasureText(caption, FFieldLabel).Height + 4);
+        /// <summary>
+        /// The line a field caption needs, plus room to breathe under it. The measurement is
+        /// taken without GDI's own padding, so the slack is added here — otherwise the tail of
+        /// "Phone" or the bottom of a bracket is shaved on any display above 100%.
+        /// </summary>
+        private static int CaptionHeight(string caption) => Math.Max(24, MeasureText(caption, FFieldLabel).Height + 8);
 
         /// <summary>The line an input of this font needs; 38 px is only enough at 100% scaling.</summary>
         private static int InputHeight(Font font) => Math.Max(38, MeasureText("0", font).Height + 14);
@@ -1485,23 +1586,34 @@ namespace GreenWoodWorkAging
 
             BuildGridColumns();
 
-            // One column, two rows: the header strip is as tall as the buttons in it, and the
-            // grid can never be laid over them.
+            // Two columns, two rows: the header strip spans the card and the grid keeps the
+            // left. The right column is the spare width the fixed grid columns leave behind —
+            // it is only opened when there is genuinely spare width, so the grid is never squeezed.
             var body = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
-                ColumnCount = 1,
+                ColumnCount = 2,
                 RowCount    = 2,
                 BackColor   = CCard,
                 Margin      = new Padding(0),
                 Padding     = new Padding(0)
             };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            _railColumn = new ColumnStyle(SizeType.Absolute, 0f);
+            body.ColumnStyles.Add(_railColumn);
             body.RowStyles.Add(new RowStyle(SizeType.Absolute,
                 BarHeightFor(btnOptimize, btnCsv, btnInvoice, btnPdf, clearAllRows)));
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            body.Controls.Add(hdrBar, 0, 0);
-            body.Controls.Add(dgv,    0, 1);
+
+            _tilesRail = BuildTilesRail();
+
+            body.Controls.Add(hdrBar,     0, 0);
+            body.SetColumnSpan(hdrBar, 2);
+            body.Controls.Add(dgv,        0, 1);
+            body.Controls.Add(_tilesRail, 1, 1);
+
+            body.Resize += (_, _) => ScheduleTilesRelayout();
+            body.Layout += (_, _) => ScheduleTilesRelayout();
 
             card.Controls.Add(body);
             return card;
@@ -1593,6 +1705,7 @@ namespace GreenWoodWorkAging
         {
             dgv.Columns.Clear();
             AddTextCol("colNo",   "#",             60);
+            AddTextCol("colSheet","Sheet",         130);
             AddTextCol("colH",    "Height",       115);
             AddTextCol("colW",    "Width",        115);
             AddTextCol("colQty",  "Qty",           70);
@@ -1600,7 +1713,7 @@ namespace GreenWoodWorkAging
             AddTextCol("colOne",  "One Piece",    110).Visible = false;   // kept for calculations only
             AddTextCol("colRow",  "Total Inches", 165);
             AddBtnCol ("colEdit", "Actions", "✏  Edit",   CGreenLight, CGreen, 140);
-            AddBtnCol ("colDel",  "Delete",  "🗑  Delete", CRedLight,   CRed,   150);
+            AddBtnCol ("colDel",  "Delete",  "✕  Delete", CRedLight,   CRed,   150);
         }
 
         // ── Summary Row ───────────────────────────────────────────────────────
@@ -1612,19 +1725,120 @@ namespace GreenWoodWorkAging
                 row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             row.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            row.Controls.Add(BuildSummaryCard("≡", "Total Rows",   CGreen, CGreenLight, out lblTotalRows,   out _),           0, 0);
-            row.Controls.Add(BuildSummaryCard("⊞", "Total Pieces", CGreen, CGreenLight, out lblTotalPieces, out _),           1, 0);
-            row.Controls.Add(BuildSummaryCard("Σ", "Grand Total",  CBrown, CBrownLight, out lblGrandTotal,  out lblGrandSub), 2, 0);
+            _tiles[0] = BuildSummaryCard("≡", "Total Rows",   CGreen, CGreenLight, out lblTotalRows,   out _);
+            _tiles[1] = BuildSummaryCard("⊞", "Total Pieces", CGreen, CGreenLight, out lblTotalPieces, out _);
+            _tiles[2] = BuildSummaryCard("Σ", "Grand Total",  CBrown, CBrownLight, out lblGrandTotal,  out lblGrandSub);
+            _tiles[3] = BuildSummaryCard("↔", "Total Feet",   CBlue,  CBlueLight,  out lblFeet,        out lblFeetSub);
 
-            var feetCard = BuildSummaryCard("↔", "Total Feet", CBlue, CBlueLight, out lblFeet, out lblFeetSub);
-            feetCard.Margin = new Padding(0);
-            row.Controls.Add(feetCard, 3, 0);
+            foreach (var tile in _tiles)
+            {
+                tile.Margin = new Padding(0, 0, 12, 0);
+                row.Controls.Add(tile, Array.IndexOf(_tiles, tile), 0);
+            }
 
             // Caption and number now share one line, so the card only needs the room that line
             // and its sub-note take — 90 px was a hand-picked height that no longer applies.
             _summaryRowHeight = Math.Max(64, CardLine(FSumVal) + CardLine(FSumSub) + 16 + 8);
+            _tileMinHeight    = CardLine(FSumVal) + 8;   // the same card with its note dropped
 
+            _tilesBand = row;
             return row;
+        }
+
+        /// <summary>
+        /// The same four tiles, stacked, for the spare width beside the grid. The rows share the
+        /// grid's height instead of fixing it, so a short window squeezes the tiles — which they
+        /// answer by dropping their sub-note — rather than pushing the last one out of sight.
+        /// </summary>
+        private TableLayoutPanel BuildTilesRail()
+        {
+            var rail = new TableLayoutPanel
+            {
+                Dock        = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount    = 4,
+                BackColor   = CBg,
+                Margin      = new Padding(0),
+                Visible     = false
+            };
+            rail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            for (int i = 0; i < 4; i++) rail.RowStyles.Add(new RowStyle(SizeType.Percent, 25f));
+            return rail;
+        }
+
+        /// <summary>
+        /// The grid's columns are fixed width, so a wide window leaves a plain white band to
+        /// their right. That band is where the totals belong; when the window is too narrow for
+        /// both, the tiles go back to the band under the grid instead of squeezing it.
+        /// </summary>
+        private void PlaceTiles(TableLayoutPanel host, bool inRail)
+        {
+            _tilesBand.Controls.Clear();
+            _tilesRail.Controls.Clear();
+
+            for (int i = 0; i < _tiles.Length; i++)
+            {
+                var tile = _tiles[i];
+                tile.Dock    = DockStyle.Fill;
+                tile.Margin  = inRail ? new Padding(0, 0, 0, 10) : new Padding(0, 0, 12, 0);
+                host.Controls.Add(tile, inRail ? 0 : i, inRail ? i : 0);
+            }
+
+            _tilesInRail     = inRail;
+            _tilesRail.Visible = inRail;
+            _railColumn.Width  = inRail ? _railWidth : 0f;
+            _bandRow.Height    = inRail ? 0f  : _summaryRowHeight;
+
+            // The rail's column belongs to the grid card and the band's row to the table above
+            // it; ask both to recompute, or the freed space stays where the old layout put it.
+            _tilesRail.Parent?.PerformLayout();
+            _tilesBand.Parent?.PerformLayout();
+        }
+
+        private float _railWidth;
+        private int   _tileMinHeight = 40;
+        private bool  _relayoutQueued;
+
+        /// <summary>
+        /// The tiles are moved while the grid card is still laying itself out, and a row or column
+        /// style changed inside that pass is recorded but never applied — the tiles would sit in
+        /// the rail and the empty band under the grid would keep its height. So the decision is
+        /// made on the next message, once every layout pass has finished.
+        /// </summary>
+        private void ScheduleTilesRelayout()
+        {
+            if (IsDisposed || !IsHandleCreated) { RelayoutTiles(); return; }
+            if (_relayoutQueued) return;
+
+            _relayoutQueued = true;
+            BeginInvoke((Action)(() => { _relayoutQueued = false; RelayoutTiles(); }));
+        }
+
+        /// <summary>
+        /// Re-decides where the tiles sit whenever the grid card changes size. The rail needs both
+        /// the width the fixed grid columns leave behind and the height to stack four readable
+        /// tiles in; if either is short, the tiles stay in the band under the grid.
+        /// </summary>
+        private void RelayoutTiles()
+        {
+            if (_tilesBand == null || _tilesRail == null || _bandRow == null || dgv == null) return;
+            if (_tilesRail.Parent is not TableLayoutPanel body) return;
+
+            int gridNeeds = 20;
+            foreach (DataGridViewColumn c in dgv.Columns)
+                if (c.Visible) gridNeeds += c.Width;
+
+            float width = Math.Min(360f, Math.Max(0f, body.ClientSize.Width - gridNeeds - 12));
+
+            // The band's own height is handed back to the grid the moment the tiles leave it, so
+            // the rail is measured with that room already returned. Without it the two states
+            // disagree about the height and the tiles flip between them on every relayout.
+            int railHeight = body.ClientSize.Height + (int)_bandRow.Height;
+            bool inRail = width >= 260f && railHeight >= 4 * _tileMinHeight + 30;
+
+            if (inRail) _railWidth = width;
+            if (inRail != _tilesInRail) PlaceTiles(inRail ? _tilesRail : _tilesBand, inRail);
+            else if (inRail) _railColumn.Width = width;
         }
 
         /// <summary>One text line inside a summary card, with a little air above and below.</summary>
@@ -1672,6 +1886,26 @@ namespace GreenWoodWorkAging
             textCol.Controls.Add(line);
             card.Controls.Add(textCol);
             card.Controls.Add(iconCol);
+
+            // Stacked beside the grid the tiles share its height, so a squeezed card keeps its
+            // number and drops the note under it, and a roomy one sits its text in the middle
+            // instead of floating a caption at the top of a tall panel.
+            int needed = line.Height + subLbl.Height + 8;
+            void FitCard()
+            {
+                bool room = card.ClientSize.Height >= needed;
+                if (subLbl.Visible != room) subLbl.Visible = room;
+
+                // textCol fills whatever the icon badge leaves, so it is exactly as tall as the
+                // card — and its own size is not settled yet while this pass is still running.
+                int content = line.Height + (room ? subLbl.Height : 0);
+                int pad = Math.Max(2, (card.ClientSize.Height - content) / 2);
+                if (textCol.Padding.Top != pad) textCol.Padding = new Padding(8, pad, 6, pad);
+            }
+            // A docked panel is resized by its parent's layout pass, which does not raise its own
+            // Layout event — so the tile listens to both, or it keeps the padding of its first size.
+            card.SizeChanged += (_, _) => FitCard();
+            card.Layout      += (_, _) => FitCard();
             return card;
         }
 
@@ -1690,7 +1924,7 @@ namespace GreenWoodWorkAging
             // The title and the fields are both grown from their own text and a filler row soaks
             // up the spare space, so a short window trims the gap instead of cutting the amounts
             // in half — which is what the fixed 26 / 66 px rows did above 100% scaling.
-            int chargeTitle  = Math.Max(26, MeasureText("💵  Bill Charges", FSecTitle).Height + 6);
+            int chargeTitle  = Math.Max(26, MeasureText("₨  Bill Charges", FSecTitle).Height + 6);
             int chargeFields = CaptionHeight("Rate / Foot") + InputHeight(FInput);
             _chargesCardHeight = Math.Max(116, 6 + chargeTitle + chargeFields + card.Margin.Top + 14);
 
@@ -1716,7 +1950,7 @@ namespace GreenWoodWorkAging
                 Margin        = new Padding(0),
                 Padding       = new Padding(0)
             };
-            titles.Controls.Add(new Label { Text = "💵  Bill Charges", Font = FSecTitle, ForeColor = CText, AutoSize = true, Margin = new Padding(0, 1, 10, 0) });
+            titles.Controls.Add(new Label { Text = "₨  Bill Charges", Font = FSecTitle, ForeColor = CText, AutoSize = true, Margin = new Padding(0, 1, 10, 0) });
             titles.Controls.Add(new Label { Text = "·  tape amount = total feet × rate", Font = new Font("Segoe UI", 8.5f), ForeColor = CSub, AutoSize = true, Margin = new Padding(0, 5, 0, 0) });
             layout.Controls.Add(titles, 0, 0);
 
@@ -1743,7 +1977,7 @@ namespace GreenWoodWorkAging
 
             row.Controls.Add(BuildFieldGroup("Rate / Foot",  nudRateFoot,  12), 0, 0);
             row.Controls.Add(BuildFieldGroup("Tape Amount",  BuildAmountBox(out lblTapeAmount,  CText, CCard),        12), 1, 0);
-            row.Controls.Add(BuildFieldGroup("Gari Fare",    nudCarriage,  12), 2, 0);
+            row.Controls.Add(BuildFieldGroup("Gari Carriage", nudCarriage,  12), 2, 0);
             row.Controls.Add(BuildFieldGroup("Sheets Cut",   nudSheetsCut, 12), 3, 0);
             row.Controls.Add(BuildFieldGroup("Rate / Sheet", nudRateSheet, 12), 4, 0);
             row.Controls.Add(BuildFieldGroup("Sheet Amount", BuildAmountBox(out lblSheetAmount, CText, CCard),        12), 5, 0);
@@ -1968,12 +2202,15 @@ namespace GreenWoodWorkAging
             _nextSerial = _measurements.Count > 0 ? _measurements.Max(m => m.SerialNumber) + 1 : 1;
 
             ResetInputs();
+            // Resume where the bill stopped: the last sheet named in it is the one the next
+            // size most likely comes off. Empty for a bill that never used the sheet field.
+            txtSheetCode.Text = _measurements.Count > 0 ? _measurements[^1].SheetCode : "";
             SetCharges(_db.GetBillCharges(bill.Id));
             RefreshGrid();
             RefreshTotals();
             ClearError();
 
-            lblSaveStatus.Text      = $"📂  Loaded bill from {bill.BillDate:dd MMM yyyy}";
+            lblSaveStatus.Text      = $"⧉  Loaded bill from {bill.BillDate:dd MMM yyyy}";
             lblSaveStatus.ForeColor = CBlue;
         }
 
@@ -1999,6 +2236,7 @@ namespace GreenWoodWorkAging
                     txtPhone.Text     = "";
                     dtpBillDate.Value = DateTime.Today;
                     ResetInputs();
+                    txtSheetCode.Text = "";
                     SetCharges(new BillCharges());
                     RefreshGrid();
                     RefreshTotals();
@@ -2045,6 +2283,7 @@ namespace GreenWoodWorkAging
             txtPhone.Text     = "";
             dtpBillDate.Value = DateTime.Today;
             ResetInputs();
+            txtSheetCode.Text = "";
             SetCharges(new BillCharges());
             RefreshGrid();
             RefreshTotals();
@@ -2095,6 +2334,7 @@ namespace GreenWoodWorkAging
                     m.WidthInches  = wi; m.WidthSooter  = ws;
                     m.Quantity     = qty;
                     m.Side         = side;
+                    m.SheetCode    = CurrentSheetCode();
                     _db.SaveMeasurement(m);
                     _editingIndex     = null;
                     btnAdd.Text       = "＋  Add";
@@ -2109,7 +2349,8 @@ namespace GreenWoodWorkAging
                         HeightInches = hi, HeightSooter = hs,
                         WidthInches  = wi, WidthSooter  = ws,
                         Quantity     = qty,
-                        Side         = side
+                        Side         = side,
+                        SheetCode    = CurrentSheetCode()
                     };
                     _db.SaveMeasurement(m);
                     _measurements.Add(m);
@@ -2191,6 +2432,7 @@ namespace GreenWoodWorkAging
             }
 
             int added = 0;
+            string importSheet = CurrentSheetCode();
             try
             {
                 foreach (var s in review.Sizes)
@@ -2202,7 +2444,8 @@ namespace GreenWoodWorkAging
                         HeightInches = s.HeightInches, HeightSooter = s.HeightSooter,
                         WidthInches  = s.WidthInches,  WidthSooter  = s.WidthSooter,
                         Quantity     = s.Quantity,
-                        Side         = MeasurementSide.Both
+                        Side         = MeasurementSide.Both,
+                        SheetCode    = importSheet
                     };
                     _db.SaveMeasurement(m);
                     _measurements.Add(m);
@@ -2341,6 +2584,7 @@ namespace GreenWoodWorkAging
             txtWidth.Text  = FormatMeasurement(m.WidthInches, m.WidthSooter);
             nudQuantity.Value     = m.Quantity;
             SelectSide(m.Side);
+            txtSheetCode.Text = m.SheetCode;
             _editingIndex     = idx;
             btnAdd.Text       = "✔  Save Changes";
             btnCancel.Visible = true;
@@ -2479,8 +2723,21 @@ namespace GreenWoodWorkAging
                 return;
             }
 
-            var plan = new SheetCuttingOptimizer().Optimize(_measurements);
+            // One plan per sheet code: a size typed under "KMI 123" is never placed on a sheet
+            // of another material. A bill without codes is one group and packs as it always did.
+            var plan = new SheetCuttingOptimizer().OptimizeBySheetCode(_measurements);
             using var form = new SheetOptimizerForm(plan, txtCustName.Text.Trim());
+            form.ShowDialog(this);
+        }
+
+        /// <summary>
+        /// The shop-side ledger of sheets a customer has left here. Opens with the bill's
+        /// customer already typed in; it reads and writes only its own table, so nothing on the
+        /// bill, the totals or the cutting plan changes.
+        /// </summary>
+        private void OpenSheetStock()
+        {
+            using var form = new SheetStockForm(_db, txtCustName.Text.Trim(), txtPhone.Text.Trim(), _currentBillId);
             form.ShowDialog(this);
         }
 
@@ -2640,8 +2897,8 @@ namespace GreenWoodWorkAging
                 string wVal = _fmt.FormatCompact(m.WidthInches,  m.WidthSooter);
                 string oVal = _fmt.FormatCompactFromEighths(m.OnePieceEighths);
                 string rVal = _fmt.FormatCompactFromEighths(m.RowTotalEighths);
-                dgv.Rows.Add(m.SerialNumber.ToString(), hVal, wVal, m.Quantity.ToString(),
-                             SideLabel(m.Side), oVal, rVal, "✏  Edit", "🗑  Delete");
+                dgv.Rows.Add(m.SerialNumber.ToString(), m.SheetCode, hVal, wVal, m.Quantity.ToString(),
+                             SideLabel(m.Side), oVal, rVal, "✏  Edit", "✕  Delete");
             }
             // Clear the current cell and row selection so the rebuilt grid does not
             // leave row 1 painted with the selection colours.
@@ -2667,7 +2924,12 @@ namespace GreenWoodWorkAging
             txtWidth.Text  = "";
             nudQuantity.Value = 1;
             SelectSide(MeasurementSide.Both);
+            // The sheet code deliberately keeps its text: one sheet usually feeds a long run of
+            // sizes, and clearing it here would force a retyping between every row.
         }
+
+        /// <summary>The sheet named in the input card, trimmed. Empty = no sheet label.</summary>
+        private string CurrentSheetCode() => (txtSheetCode?.Text ?? "").Trim();
 
         // ════════════════════════════════════════════════════════════════════
         //  Clock
@@ -2735,7 +2997,28 @@ namespace GreenWoodWorkAging
             return tb;
         }
 
+        /// <summary>
+        /// A plain-text box (sheet codes, names) with the same look as the measurement
+        /// inputs but no digit filter.
+        /// </summary>
+        private static TextBox BuildTextEntry(Point loc, int width, int height, int maxLength)
+        {
+            var tb = new TextBox
+            {
+                Location    = loc,
+                Size        = new Size(width, height),
+                Font        = FInput,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor   = Color.FromArgb(250, 252, 254),
+                MaxLength   = maxLength
+            };
+            tb.Enter += (_, _) => tb.BackColor = Color.FromArgb(235, 250, 242);
+            tb.Leave += (_, _) => tb.BackColor = Color.FromArgb(250, 252, 254);
+            return tb;
+        }
+
         private static NumericUpDown BuildNud(Point loc, int width, int height, int min, int max)
+
         {
             var nud = new NumericUpDown
             {

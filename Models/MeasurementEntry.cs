@@ -65,6 +65,13 @@ namespace GreenWoodWorkAging.Models
         /// <summary>Which edges the tape is run along. Both = the original four-sides rule.</summary>
         public MeasurementSide Side { get; set; } = MeasurementSide.Both;
 
+        /// <summary>
+        /// The sheet this size is cut from, typed before the sizes — "KMI 123", "Super Glass", …
+        /// Empty means the sheet was never named, which is how every bill written before this
+        /// option still reads, and how a bill with one material behaves: one plan, no labels.
+        /// </summary>
+        public string SheetCode { get; set; } = "";
+
         // ── Computed (no storage) ─────────────────────────────────────────────
 
         /// <summary>How many tape edges run along the height for this selection.</summary>

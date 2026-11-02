@@ -134,9 +134,9 @@ namespace GreenWoodWorkAging.Services
         /// </summary>
         private static void DrawPieceLabels(Graphics g, RectangleF rect, string widthText, string heightText)
         {
-            using var bold = new Font("Segoe UI", 8.5f, FontStyle.Bold);
-            using var small = new Font("Segoe UI", 7f, FontStyle.Bold);
-            using var ink  = new SolidBrush(Ink);
+            using var bold  = new Font("Segoe UI", 9f, FontStyle.Bold);
+            using var small = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+            using var ink   = new SolidBrush(Ink);
 
             float band = g.MeasureString("0", bold).Height;
 
@@ -150,15 +150,47 @@ namespace GreenWoodWorkAging.Services
 
             // The width then gets whatever is left of the top edge, so the two never share space.
             float room = rect.Width - strip;
-            if (room < 18 || rect.Height < band + 4) return;
+            if (rect.Height < band + 4) return;
 
             var font = g.MeasureString(widthText, bold).Width <= room - 2 ? bold : small;
             float textW = g.MeasureString(widthText, font).Width;
-            if (textW > room) return;
 
-            g.DrawString(widthText, font, ink,
-                rect.X + strip + (room - textW) / 2f,
-                rect.Y + (band - g.MeasureString(widthText, font).Height) / 2f + 2);
+            if (textW <= room && room >= 12)
+            {
+                DrawLabel(g, widthText, font, ink,
+                    rect.X + strip + (room - textW) / 2f,
+                    rect.Y + (band - g.MeasureString(widthText, font).Height) / 2f + 2);
+                return;
+            }
+
+            // A long strip has no top edge wide enough for its own width, but it is tall — so
+            // the number runs up the middle of it instead of disappearing off the plan.
+            if (rect.Width < band + 4) return;
+            if (rect.Height < g.MeasureString(widthText, small).Width + 6) return;
+
+            DrawUpTheMiddle(g, rect, widthText, small, ink);
+        }
+
+        /// <summary>Text on a pale plate, because ink alone on a coloured fill is hard to read.</summary>
+        private static void DrawLabel(Graphics g, string text, Font font, Brush ink, float x, float y)
+        {
+            var size = g.MeasureString(text, font);
+            using (var plate = new SolidBrush(Color.FromArgb(165, Color.White)))
+                g.FillRectangle(plate, x - 1, y - 1, size.Width + 2, size.Height);
+            g.DrawString(text, font, ink, x, y);
+        }
+
+        /// <summary>The width number bottom-to-top through the middle of a narrow piece.</summary>
+        private static void DrawUpTheMiddle(Graphics g, RectangleF rect, string text, Font font, Brush ink)
+        {
+            float width = g.MeasureString(text, font).Width;
+            float x = rect.X + rect.Width / 2f - g.MeasureString(text, font).Height / 2f;
+
+            var state = g.Save();
+            g.TranslateTransform(x, rect.Bottom - 2);
+            g.RotateTransform(-90);
+            g.DrawString(text, font, ink, 1, (rect.Height - width) / 2f - 2);
+            g.Restore(state);
         }
 
         /// <summary>Text running bottom-to-top along the piece's left edge.</summary>

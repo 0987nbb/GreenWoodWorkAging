@@ -149,5 +149,34 @@ namespace GreenWoodWorkAging
 
             Assert.True(File.Exists(Path.Combine(dir, "notape0.png")));
         }
+        /// <summary>
+        /// Sizes cut from different sheets have to be told apart on the customer's bill, so the
+        /// sheet code each row belongs to is printed beside it. A bill with no codes prints the
+        /// old seven-column table — nothing shifts for bills already written.
+        /// </summary>
+        [Fact]
+        public void Bill_WithSheetCodes_PrintsWhichSheetEachSizeIs()
+        {
+            var rows = new List<MeasurementEntry>
+            {
+                new() { SerialNumber = 1, HeightInches = 30, WidthInches = 12, Quantity = 2, SheetCode = "KMI 123" },
+                new() { SerialNumber = 2, HeightInches = 24, WidthInches = 14, Quantity = 1, SheetCode = "KMI 123" },
+                new() { SerialNumber = 3, HeightInches = 18, WidthInches =  8, Quantity = 4, SheetCode = "Super Glass" }
+            };
+
+            string dir = Path.Combine(Path.GetTempPath(), "gwa-pdf", DateTime.Now.ToString("HHmmssff"));
+            Directory.CreateDirectory(dir);
+
+            var coded = Sample(rows: rows);
+            BillPdfService.Build(coded).GenerateImages(p => Path.Combine(dir, $"sheets{p}.png"),
+                new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+
+            var plain = Sample();
+            BillPdfService.Build(plain).GenerateImages(p => Path.Combine(dir, $"uncoded{p}.png"),
+                new ImageGenerationSettings { ImageFormat = ImageFormat.Png, RasterDpi = 150 });
+
+            Assert.True(File.Exists(Path.Combine(dir, "sheets0.png")));
+            Assert.True(File.Exists(Path.Combine(dir, "uncoded0.png")));
+        }
     }
 }

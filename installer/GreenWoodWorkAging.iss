@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ;  Green Wood Works — installer definition
 ;
 ;  Do not run ISCC by hand. installer\build-installer.ps1 publishes the app
@@ -17,7 +17,7 @@
 
 ; build-installer.ps1 always passes this; the default only keeps ISCC usable on its own.
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "2.0.0"
 #endif
 
 [Setup]

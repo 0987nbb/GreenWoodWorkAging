@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <!-- The windows are drawn against a throwaway database, so the store comes along. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageReference Include="QuestPDF" Version="2026.9.1" />
     <PackageReference Include="Tesseract" Version="5.2.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
@@ -29,8 +31,11 @@
     <Compile Include="..\Models\BillCharges.cs" Link="Models\BillCharges.cs" />
     <Compile Include="..\Models\SheetCutting.cs" Link="Models\SheetCutting.cs" />
     <Compile Include="..\Models\ImportedSize.cs" Link="Models\ImportedSize.cs" />
+    <Compile Include="..\Models\SheetStock.cs" Link="Models\SheetStock.cs" />
     <!-- Only the import review window, so its layout can be rendered and looked at. -->
     <Compile Include="..\ImageImportForm.cs" Link="ImageImportForm.cs" />
+    <Compile Include="..\Services\AppPaths.cs" Link="Services\AppPaths.cs" />
+    <Compile Include="..\Services\DatabaseService.cs" Link="Services\DatabaseService.cs" />
     <Compile Include="..\Services\MeasurementCalculatorService.cs" Link="Services\MeasurementCalculatorService.cs" />
     <!-- The review windows carry the branded title-bar icon, so the icon loader comes too. -->
     <Compile Include="..\Services\AppIcon.cs" Link="Services\AppIcon.cs" />
@@ -42,6 +47,8 @@
     <Compile Include="..\Services\SheetPlanPdfService.cs" Link="Services\SheetPlanPdfService.cs" />
     <!-- Only the two review windows, so their layout can be rendered and looked at. -->
     <Compile Include="..\SheetOptimizerForm.cs" Link="SheetOptimizerForm.cs" />
+    <Compile Include="..\SheetStockForm.cs" Link="SheetStockForm.cs" />
+    <Compile Include="..\CarpenterMeasurementCalculatorForm.cs" Link="CarpenterMeasurementCalculatorForm.cs" />
     <Compile Include="..\Services\SizeListParser.cs" Link="Services\SizeListParser.cs" />
     <Compile Include="..\Services\ImagePreprocessor.cs" Link="Services\ImagePreprocessor.cs" />
     <Compile Include="..\Services\ImageSizeImporter.cs" Link="Services\ImageSizeImporter.cs" />
