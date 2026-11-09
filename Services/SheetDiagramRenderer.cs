@@ -47,15 +47,15 @@ namespace GreenWoodWorkAging.Services
             g.SmoothingMode     = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            float scale = Math.Min((box.Width  - margin * 2) / (float)sheet.SheetWidthEighths,
-                                   (box.Height - margin * 2) / (float)sheet.SheetHeightEighths);
+            float scale = Math.Min((box.Width  - margin * 2) / (float)sheet.SheetWidthSixteenths,
+                                   (box.Height - margin * 2) / (float)sheet.SheetHeightSixteenths);
             if (scale <= 0) return RectangleF.Empty;
 
             var origin = new PointF(
-                box.X + (box.Width  - sheet.SheetWidthEighths * scale) / 2f,
-                box.Y + (box.Height - sheet.SheetHeightEighths * scale) / 2f);
+                box.X + (box.Width  - sheet.SheetWidthSixteenths * scale) / 2f,
+                box.Y + (box.Height - sheet.SheetHeightSixteenths * scale) / 2f);
 
-            var sheetRect = Pixels(origin, scale, 0, 0, sheet.SheetWidthEighths, sheet.SheetHeightEighths);
+            var sheetRect = Pixels(origin, scale, 0, 0, sheet.SheetWidthSixteenths, sheet.SheetHeightSixteenths);
 
             using (var paper = new SolidBrush(Paper))
                 g.FillRectangle(paper, sheetRect);
@@ -76,7 +76,7 @@ namespace GreenWoodWorkAging.Services
 
         private static void DrawPiece(Graphics g, PointF origin, float scale, CutPlacement piece)
         {
-            var rect = Pixels(origin, scale, piece.X, piece.Y, piece.WidthEighths, piece.HeightEighths);
+            var rect = Pixels(origin, scale, piece.X, piece.Y, piece.WidthSixteenths, piece.HeightSixteenths);
             var (fill, line) = Palette[Math.Abs(piece.SerialNumber) % Palette.Length];
 
             using (var body = new SolidBrush(fill))
@@ -87,8 +87,8 @@ namespace GreenWoodWorkAging.Services
             // The two numbers belong to the two edges they measure: width along the top,
             // height down the left — the same way the reference plans read.
             DrawPieceLabels(g, rect,
-                Fmt.FormatCompactFromEighths(piece.WidthEighths),
-                Fmt.FormatCompactFromEighths(piece.HeightEighths));
+                Fmt.FormatCompactFromSixteenths(piece.WidthSixteenths),
+                Fmt.FormatCompactFromSixteenths(piece.HeightSixteenths));
 
             if (piece.Rotated && rect.Width > 24 && rect.Height > 24)
             {
@@ -101,7 +101,7 @@ namespace GreenWoodWorkAging.Services
 
         private static void DrawScrap(Graphics g, PointF origin, float scale, ScrapRect scrap)
         {
-            var rect = Pixels(origin, scale, scrap.X, scrap.Y, scrap.WidthEighths, scrap.HeightEighths);
+            var rect = Pixels(origin, scale, scrap.X, scrap.Y, scrap.WidthSixteenths, scrap.HeightSixteenths);
             if (rect.Width < 3 || rect.Height < 3) return;
 
             using (var hatch = new HatchBrush(HatchStyle.LightDownwardDiagonal, ScrapLine, ScrapFill))
@@ -112,8 +112,8 @@ namespace GreenWoodWorkAging.Services
             // Only worth a label while the off-cut could still be used.
             if (rect.Width < 44 || rect.Height < 26) return;
 
-            string label = $"{Fmt.FormatCompactFromEighths(scrap.WidthEighths)} × " +
-                           $"{Fmt.FormatCompactFromEighths(scrap.HeightEighths)}";
+            string label = $"{Fmt.FormatCompactFromSixteenths(scrap.WidthSixteenths)} × " +
+                           $"{Fmt.FormatCompactFromSixteenths(scrap.HeightSixteenths)}";
             using var font = new Font("Segoe UI", 7.5f);
             using var ink  = new SolidBrush(Subtle);
             var size = g.MeasureString(label, font);

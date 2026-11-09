@@ -2,8 +2,10 @@ namespace GreenWoodWorkAging.Services
 {
     /// <summary>
     /// Validates all user inputs for the carpenter measurement calculator.
-    /// Supports the combined "inches.sooter" format — e.g. "79.7" means 79 inches + 7 sooter.
-    /// Returns structured validation results — never throws exceptions for bad user input.
+    /// Supports the combined "inches.sooter" format — e.g. "79.7" means 79 inches + 7 sooter —
+    /// and the sady (half-sooter) codes a customer's tape gives, where "8.19" means
+    /// 8 inches + 1½ sooter. Returns structured validation results — never throws
+    /// exceptions for bad user input.
     /// </summary>
     public class MeasurementInputValidator
     {
@@ -21,16 +23,74 @@ namespace GreenWoodWorkAging.Services
         public record ValidationResult(bool IsValid, string ErrorMessage = "");
 
         /// <summary>
-        /// Parsed result from a combined "inches.sooter" field.
+        /// Parsed result from a combined "inches.sooter" field. <see cref="Half"/> is the sady —
+        /// half a sooter — so 8.19 reads back as 8 inches, 1 sooter and a half.
         /// </summary>
-        public record ParsedMeasurement(int Inches, int Sooter);
+        public record ParsedMeasurement(int Inches, int Sooter, int Half = 0);
+
+        // ── The one reading rule ─────────────────────────────────────────────
+
+        /// <summary>
+        /// What a typed measurement actually means, in sixteenths of an inch. This is the only
+        /// place that decision is made, so the Add box, the image reader and the size-list parser
+        /// cannot drift apart on a number the shop is billed for.
+        ///
+        ///   "80"     → 80 inches
+        ///   "8.4"    → 8 in 4 sooter      (one digit is the sooter count, as it always was)
+        ///   "8.8"    → 9 in               (8 sooter is a full inch, so it carries)
+        ///   "8.12"   → 8 in 1 sooter      (two digits are the decimal inch: .12 × 16 ≈ 2)
+        ///   "8.19"   → 8 in 1½ sooter     (.19 × 16 ≈ 3 sixteenths — a sady)
+        /// </summary>
+        public static bool TryReadSixteenths(string? text, out int sixteenths)
+        {
+            sixteenths = 0;
+            string trimmed = (text ?? "").Trim();
+            if (trimmed.Length == 0) return false;
+
+            int dot = trimmed.IndexOf('.');
+            if (dot < 0)
+            {
+                if (!int.TryParse(trimmed, out int inches) || inches < MinInches) return false;
+                sixteenths = inches * Models.Sooter.PerInch;
+                return true;
+            }
+
+            string inchesPart = trimmed[..dot];
+            string digits     = trimmed[(dot + 1)..];
+
+            if (!int.TryParse(inchesPart, out int whole) || whole < MinInches) return false;
+            if (digits.Length == 0)
+            {
+                sixteenths = whole * Models.Sooter.PerInch;
+                return true;
+            }
+
+            if (!int.TryParse(digits, out int fraction)) return false;
+            if (digits.Length > 4) return false;   // more precision than a tape holds is a mis-read
+
+            // One digit is the shop's sooter count; two or more are the decimal inch it was
+            // read off a tape as, which lands on the nearest half-sooter.
+            int rest = digits.Length == 1
+                ? fraction * Models.Sooter.PerSooter
+                : (int)Math.Round(fraction * (double)Models.Sooter.PerInch / PowerOfTen(digits.Length));
+
+            sixteenths = whole * Models.Sooter.PerInch + rest;
+            return true;
+        }
+
+        private static int PowerOfTen(int digits)
+        {
+            int result = 1;
+            for (int i = 0; i < digits; i++) result *= 10;
+            return result;
+        }
 
         // ── Combined "inches.sooter" parser & validator ──────────────────────
 
         /// <summary>
         /// Parses and validates a single measurement field in "inches.sooter" format.
-        /// Examples: "79.7" → 79in 7sooter, "80" or "80.0" → 80in 0sooter, "17.4" → 17in 4sooter.
-        /// The sooter part (after the dot) must be 0–7.
+        /// Examples: "79.7" → 79in 7sooter, "80" or "80.0" → 80in 0sooter, "8.19" → 8in 1½sooter.
+        /// Eight sooter carry into the inch, so the largest fraction is 7½.
         /// </summary>
         public (ValidationResult result, ParsedMeasurement? parsed)
             ParseAndValidateMeasurement(string text, string fieldName)
@@ -40,30 +100,10 @@ namespace GreenWoodWorkAging.Services
             if (string.IsNullOrEmpty(trimmed))
                 return (Fail($"{fieldName} cannot be empty. Enter as inches.sooter, e.g. 79.7"), null);
 
-            int inches;
-            int sooter;
+            if (!TryReadSixteenths(trimmed, out int sixteenths))
+                return (Fail($"{fieldName} is not valid. Use format inches.sooter, e.g. 79.7"), null);
 
-            int dotIndex = trimmed.IndexOf('.');
-            if (dotIndex < 0)
-            {
-                // No dot → pure inches, sooter = 0
-                if (!int.TryParse(trimmed, out inches))
-                    return (Fail($"{fieldName} is not valid. Use format inches.sooter, e.g. 79.7"), null);
-                sooter = 0;
-            }
-            else
-            {
-                string inchesPart = trimmed[..dotIndex];
-                string sooterPart = trimmed[(dotIndex + 1)..];
-
-                if (!int.TryParse(inchesPart, out inches))
-                    return (Fail($"{fieldName}: inches part \"{inchesPart}\" must be a whole number."), null);
-
-                if (string.IsNullOrEmpty(sooterPart))
-                    sooter = 0;
-                else if (!int.TryParse(sooterPart, out sooter))
-                    return (Fail($"{fieldName}: sooter part \"{sooterPart}\" must be a digit 0–7."), null);
-            }
+            var (inches, sooter, half) = Models.Sooter.Split(sixteenths);
 
             if (inches < MinInches || inches > MaxInches)
                 return (Fail($"{fieldName} inches must be between {MinInches} and {MaxInches}."), null);
@@ -71,7 +111,7 @@ namespace GreenWoodWorkAging.Services
             if (sooter < MinSooter || sooter > MaxSooter)
                 return (Fail($"{fieldName} sooter must be 0–7 (1 inch = 8 sooter). Got: {sooter}"), null);
 
-            return (Ok(), new ParsedMeasurement(inches, sooter));
+            return (Ok(), new ParsedMeasurement(inches, sooter, half));
         }
 
         // ── Quantity validator ───────────────────────────────────────────────
@@ -109,8 +149,8 @@ namespace GreenWoodWorkAging.Services
             if (!qResult.IsValid) return (qResult, null, null);
 
             // At least one dimension must be > 0
-            if (hParsed!.Inches == 0 && hParsed.Sooter == 0 &&
-                wParsed!.Inches == 0 && wParsed.Sooter == 0)
+            if (hParsed!.Inches == 0 && hParsed.Sooter == 0 && hParsed.Half == 0 &&
+                wParsed!.Inches == 0 && wParsed.Sooter == 0 && wParsed.Half == 0)
                 return (Fail("At least one dimension (height or width) must be greater than zero."), null, null);
 
             return (Ok(), hParsed, wParsed);

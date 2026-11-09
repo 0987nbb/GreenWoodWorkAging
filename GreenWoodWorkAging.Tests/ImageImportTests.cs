@@ -45,8 +45,8 @@ namespace GreenWoodWorkAging.Tests
         {
             var s = SingleSize(text);
 
-            Assert.Equal(89 * 8, s.HeightEighths);
-            Assert.Equal(24 * 8, s.WidthEighths);
+            Assert.Equal(89 * Sooter.PerInch, s.HeightSixteenths);
+            Assert.Equal(24 * Sooter.PerInch, s.WidthSixteenths);
             Assert.Equal(2, s.Quantity);
         }
 
@@ -62,7 +62,7 @@ namespace GreenWoodWorkAging.Tests
         }
 
         [Fact]
-        public void TwoDigitsAfterThePoint_DecimalInches_RoundedToEighths()
+        public void TwoDigitsAfterThePoint_DecimalInches_RoundedToSixteenths()
         {
             var s = SingleSize("79.75 x 24");
 
@@ -122,8 +122,8 @@ namespace GreenWoodWorkAging.Tests
 
             Assert.Equal(3, parsed.Sizes.Count);
             Assert.Empty(parsed.UnreadLines);
-            Assert.Equal(79 * 8 + 7, parsed.Sizes[2].HeightEighths);
-            Assert.Equal(24 * 8 + 3, parsed.Sizes[2].WidthEighths);
+            Assert.Equal(Sooter.Combine(79, 7), parsed.Sizes[2].HeightSixteenths);
+            Assert.Equal(Sooter.Combine(24, 3), parsed.Sizes[2].WidthSixteenths);
         }
 
         [Theory]
@@ -174,8 +174,8 @@ namespace GreenWoodWorkAging.Tests
                 rows.Add(new MeasurementEntry
                 {
                     SerialNumber = serial++,
-                    HeightInches = s.HeightInches, HeightSooter = s.HeightSooter,
-                    WidthInches  = s.WidthInches,  WidthSooter  = s.WidthSooter,
+                    HeightInches = s.HeightInches, HeightSooter = s.HeightSooter, HeightHalf = s.HeightHalf,
+                    WidthInches  = s.WidthInches,  WidthSooter  = s.WidthSooter,  WidthHalf  = s.WidthHalf,
                     Quantity     = s.Quantity,
                     Side         = MeasurementSide.Both
                 });
@@ -240,12 +240,12 @@ namespace GreenWoodWorkAging.Tests
             Assert.Null(result.Error);
             Assert.Equal(3, result.Sizes.Count);
 
-            Assert.Equal(89 * 8,      result.Sizes[0].HeightEighths);
-            Assert.Equal(24 * 8,      result.Sizes[0].WidthEighths);
+            Assert.Equal(89 * Sooter.PerInch,      result.Sizes[0].HeightSixteenths);
+            Assert.Equal(24 * Sooter.PerInch,      result.Sizes[0].WidthSixteenths);
             Assert.Equal(2,           result.Sizes[0].Quantity);
-            Assert.Equal(80 * 8,      result.Sizes[1].HeightEighths);
-            Assert.Equal(79 * 8 + 7,  result.Sizes[2].HeightEighths);
-            Assert.Equal(24 * 8 + 3,  result.Sizes[2].WidthEighths);
+            Assert.Equal(80 * Sooter.PerInch,      result.Sizes[1].HeightSixteenths);
+            Assert.Equal(Sooter.Combine(79, 7),  result.Sizes[2].HeightSixteenths);
+            Assert.Equal(Sooter.Combine(24, 3),  result.Sizes[2].WidthSixteenths);
         }
 
         [Fact]
@@ -361,13 +361,13 @@ namespace GreenWoodWorkAging.Tests
             Assert.Null(result.Error);
             Assert.Equal(3, result.Sizes.Count);
 
-            Assert.Equal(89 * 8, result.Sizes[0].HeightEighths);
-            Assert.Equal(24 * 8, result.Sizes[0].WidthEighths);
+            Assert.Equal(89 * Sooter.PerInch, result.Sizes[0].HeightSixteenths);
+            Assert.Equal(24 * Sooter.PerInch, result.Sizes[0].WidthSixteenths);
             Assert.Equal(2,      result.Sizes[0].Quantity);
-            Assert.Equal(80 * 8, result.Sizes[1].HeightEighths);
-            Assert.Equal(18 * 8, result.Sizes[1].WidthEighths);
+            Assert.Equal(80 * Sooter.PerInch, result.Sizes[1].HeightSixteenths);
+            Assert.Equal(18 * Sooter.PerInch, result.Sizes[1].WidthSixteenths);
             Assert.Equal(1,      result.Sizes[1].Quantity);
-            Assert.Equal(60 * 8, result.Sizes[2].HeightEighths);
+            Assert.Equal(60 * Sooter.PerInch, result.Sizes[2].HeightSixteenths);
             Assert.Equal(3,      result.Sizes[2].Quantity);
         }
 

@@ -97,7 +97,9 @@ namespace GreenWoodWorkAging.Services
                     WidthSooter  INTEGER NOT NULL,
                     Quantity     INTEGER NOT NULL,
                     SideMode     INTEGER NOT NULL DEFAULT 0,
-                    SheetCode    TEXT    NOT NULL DEFAULT ''
+                    SheetCode    TEXT    NOT NULL DEFAULT '',
+                    HeightHalf   INTEGER NOT NULL DEFAULT 0,
+                    WidthHalf    INTEGER NOT NULL DEFAULT 0
                 );");
 
             // Rows written before the side option existed have no SideMode column yet.
@@ -129,6 +131,24 @@ namespace GreenWoodWorkAging.Services
                 }
                 if (!hasSheetCode)
                     Exec(cn, "ALTER TABLE Measurements ADD COLUMN SheetCode TEXT NOT NULL DEFAULT '';");
+            }
+            catch { }
+
+            // …and rows written before a size could carry a sady have no half-sooter column.
+            // Both default to 0, which is what every older measurement means: no half sooter.
+            try
+            {
+                var measureColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var cmd = cn.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA table_info(Measurements);";
+                    using var rdr = cmd.ExecuteReader();
+                    while (rdr.Read()) measureColumns.Add(rdr.GetString(1));
+                }
+                if (!measureColumns.Contains("HeightHalf"))
+                    Exec(cn, "ALTER TABLE Measurements ADD COLUMN HeightHalf INTEGER NOT NULL DEFAULT 0;");
+                if (!measureColumns.Contains("WidthHalf"))
+                    Exec(cn, "ALTER TABLE Measurements ADD COLUMN WidthHalf  INTEGER NOT NULL DEFAULT 0;");
             }
             catch { }
 
@@ -423,8 +443,8 @@ namespace GreenWoodWorkAging.Services
                 using var cmd = cn.CreateCommand();
                 cmd.CommandText = @"
                     INSERT INTO Measurements
-                        (BillId, SerialNumber, HeightInches, HeightSooter, WidthInches, WidthSooter, Quantity, SideMode, SheetCode)
-                    VALUES ($bid, $sn, $hi, $hs, $wi, $ws, $qty, $side, $sheet);
+                        (BillId, SerialNumber, HeightInches, HeightSooter, WidthInches, WidthSooter, Quantity, SideMode, SheetCode, HeightHalf, WidthHalf)
+                    VALUES ($bid, $sn, $hi, $hs, $wi, $ws, $qty, $side, $sheet, $hh, $wh);
                     SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("$bid",  m.BillId);
                 cmd.Parameters.AddWithValue("$sn",   m.SerialNumber);
@@ -435,6 +455,8 @@ namespace GreenWoodWorkAging.Services
                 cmd.Parameters.AddWithValue("$qty",  m.Quantity);
                 cmd.Parameters.AddWithValue("$side", (int)m.Side);
                 cmd.Parameters.AddWithValue("$sheet", m.SheetCode ?? "");
+                cmd.Parameters.AddWithValue("$hh",   m.HeightHalf);
+                cmd.Parameters.AddWithValue("$wh",   m.WidthHalf);
                 m.Id = Convert.ToInt32(cmd.ExecuteScalar());
             }
             else
@@ -444,7 +466,7 @@ namespace GreenWoodWorkAging.Services
                     UPDATE Measurements
                     SET HeightInches=$hi, HeightSooter=$hs,
                         WidthInches=$wi,  WidthSooter=$ws, Quantity=$qty, SideMode=$side,
-                        SheetCode=$sheet
+                        SheetCode=$sheet, HeightHalf=$hh, WidthHalf=$wh
                     WHERE Id=$id;";
                 cmd.Parameters.AddWithValue("$id",    m.Id);
                 cmd.Parameters.AddWithValue("$hi",    m.HeightInches);
@@ -454,6 +476,8 @@ namespace GreenWoodWorkAging.Services
                 cmd.Parameters.AddWithValue("$qty",   m.Quantity);
                 cmd.Parameters.AddWithValue("$side",  (int)m.Side);
                 cmd.Parameters.AddWithValue("$sheet", m.SheetCode ?? "");
+                cmd.Parameters.AddWithValue("$hh",    m.HeightHalf);
+                cmd.Parameters.AddWithValue("$wh",    m.WidthHalf);
                 cmd.ExecuteNonQuery();
             }
         }
@@ -465,7 +489,8 @@ namespace GreenWoodWorkAging.Services
             cmd.CommandText = @"
                 SELECT Id, BillId, SerialNumber,
                        HeightInches, HeightSooter, WidthInches, WidthSooter, Quantity,
-                       IFNULL(SideMode, 0), IFNULL(SheetCode, '')
+                       IFNULL(SideMode, 0), IFNULL(SheetCode, ''),
+                       IFNULL(HeightHalf, 0), IFNULL(WidthHalf, 0)
                 FROM Measurements
                 WHERE BillId=$bid
                 ORDER BY SerialNumber;";
@@ -486,7 +511,9 @@ namespace GreenWoodWorkAging.Services
                     WidthSooter  = rdr.GetInt32(6),
                     Quantity     = rdr.GetInt32(7),
                     Side         = (MeasurementSide)rdr.GetInt32(8),
-                    SheetCode    = rdr.GetString(9)
+                    SheetCode    = rdr.GetString(9),
+                    HeightHalf   = rdr.GetInt32(10),
+                    WidthHalf    = rdr.GetInt32(11)
                 });
             }
             return list;

@@ -58,8 +58,8 @@ namespace GreenWoodWorkAging.Services
             QuestPDF.Settings.License = LicenseType.Community;
 
             var    totals  = Calc.CalculateGrandTotal(data.Rows);
-            int    eighths = totals.GrandTotalEighths;
-            string grandIn = Fmt.FormatCompactFromEighths(eighths);
+            int    sixteenths = totals.GrandTotalSixteenths;
+            string grandIn = Fmt.FormatCompactFromSixteenths(sixteenths);
             string grandFt = Fmt.FormatGrandTotalFeetDot(totals);
 
             return QuestPDF.Fluent.Document.Create(container =>
@@ -76,7 +76,7 @@ namespace GreenWoodWorkAging.Services
                     page.Content().Column(col =>
                     {
                         Header(col, data);
-                        Content(col, data, totals, eighths, grandIn, grandFt);
+                        Content(col, data, totals, sixteenths, grandIn, grandFt);
                     });
 
                     page.Footer().Column(col =>
@@ -144,7 +144,7 @@ namespace GreenWoodWorkAging.Services
         // ── Content ──────────────────────────────────────────────────────────
 
         private static void Content(ColumnDescriptor col, BillPdfData data, GrandTotalResult totals,
-                                    int eighths, string grandIn, string grandFt)
+                                    int sixteenths, string grandIn, string grandFt)
         {
             col.Item().PaddingTop(18).Border(0.8f).BorderColor(Line).CornerRadius(6)
                .PaddingHorizontal(14).PaddingVertical(10).Row(row =>
@@ -160,13 +160,13 @@ namespace GreenWoodWorkAging.Services
                 col.Item().PaddingTop(16).Table(table => MeasurementTable(table, data, grandIn, grandFt));
             else
                 col.Item().PaddingTop(16).Border(0.8f).BorderColor(Line).CornerRadius(6)
-                   .PaddingHorizontal(14).PaddingVertical(4).Column(c => TotalsOnly(c, totals, eighths, grandIn, grandFt));
+                   .PaddingHorizontal(14).PaddingVertical(4).Column(c => TotalsOnly(c, totals, sixteenths, grandIn, grandFt));
 
             // Rows/pieces and the inch/feet grand total are already printed on the items
             // line and the table's total bar, so charges take the full width here.
             if (!data.Charges.IsEmpty)
                 col.Item().PaddingTop(22).PreventPageBreak()
-                   .Table(table => ChargesTable(table, data.Charges, eighths));
+                   .Table(table => ChargesTable(table, data.Charges, sixteenths));
             else
                 col.Item().PaddingTop(22)
                    .Text("No rates entered — this bill shows measurements only.")
@@ -225,12 +225,12 @@ namespace GreenWoodWorkAging.Services
                 var shade = i++ % 2 == 0 ? Paper : RowAlt;
                 RowCell(shade, m.SerialNumber.ToString());
                 if (showSheet) RowCell(shade, m.SheetCode);
-                RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter));
-                RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter));
+                RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf));
+                RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter,  m.WidthHalf));
                 RowCell(shade, m.Quantity.ToString());
                 RowCell(shade, MeasurementDisplayFormatter.FormatSides(m.Side));
-                RowCell(shade, Fmt.FormatCompactFromEighths(m.RowTotalEighths));
-                RowCell(shade, $"{m.RowTotalEighths / 96m:0.00}");
+                RowCell(shade, Fmt.FormatCompactFromSixteenths(m.RowTotalSixteenths));
+                RowCell(shade, $"{BillCharges.FeetFromSixteenths(m.RowTotalSixteenths):0.00}");
 
                 void RowCell(PdfColor back, string text) =>
                     table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
@@ -248,7 +248,7 @@ namespace GreenWoodWorkAging.Services
         /// grand total the bill's last bar carries, on its own.
         /// </summary>
         private static void TotalsOnly(ColumnDescriptor col, GrandTotalResult totals,
-                                       int eighths, string grandIn, string grandFt)
+                                       int sixteenths, string grandIn, string grandFt)
         {
             col.Item().PaddingVertical(10).Row(row =>
             {
@@ -265,7 +265,7 @@ namespace GreenWoodWorkAging.Services
                 row.RelativeItem().AlignRight().AlignMiddle().Column(c =>
                 {
                     c.Item().Text($"{totals.TotalRows} items  ·  {totals.TotalPieces} pieces").FontSize(9).FontColor(Subtle);
-                    c.Item().PaddingTop(3).Text($"{BillCharges.Feet(eighths):0.00} ft of tape").FontSize(9).FontColor(Subtle);
+                    c.Item().PaddingTop(3).Text($"{BillCharges.Feet(sixteenths):0.00} ft of tape").FontSize(9).FontColor(Subtle);
                 });
             });
         }
@@ -288,9 +288,9 @@ namespace GreenWoodWorkAging.Services
 
         // ── Charges ──────────────────────────────────────────────────────────
 
-        private static void ChargesTable(TableDescriptor table, BillCharges charges, int eighths)
+        private static void ChargesTable(TableDescriptor table, BillCharges charges, int sixteenths)
         {
-            decimal feet = BillCharges.Feet(eighths);
+            decimal feet = BillCharges.Feet(sixteenths);
 
             table.ColumnsDefinition(c =>
             {
@@ -302,7 +302,7 @@ namespace GreenWoodWorkAging.Services
                  .Text("CHARGES & AMOUNT").FontSize(9).Bold().FontColor(Paper);
 
             ChargeRow("Rate per foot", BillCharges.Rupees(charges.RatePerFoot) + " / ft");
-            ChargeRow($"Tape amount  ({feet:0.00} ft)", BillCharges.Rupees(charges.TapeAmount(eighths)));
+            ChargeRow($"Tape amount  ({feet:0.00} ft)", BillCharges.Rupees(charges.TapeAmount(sixteenths)));
             ChargeRow("Gari carriage", BillCharges.Rupees(charges.CarriageFare));
             ChargeRow($"Sheet cuts  ({charges.SheetCuts} × {BillCharges.Rupees(charges.RatePerSheet)})",
                       BillCharges.Rupees(charges.SheetAmount));
@@ -311,7 +311,7 @@ namespace GreenWoodWorkAging.Services
             {
                 r.RelativeItem().Text("TOTAL AMOUNT").FontSize(10).Bold().FontColor(Paper);
                 r.ConstantItem(84).AlignRight()
-                 .Text(BillCharges.Rupees(charges.TotalAmount(eighths))).FontSize(11).Bold().FontColor(Paper);
+                 .Text(BillCharges.Rupees(charges.TotalAmount(sixteenths))).FontSize(11).Bold().FontColor(Paper);
             });
 
             void ChargeRow(string caption, string amount)

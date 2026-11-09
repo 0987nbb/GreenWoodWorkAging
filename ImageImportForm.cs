@@ -240,8 +240,8 @@ namespace GreenWoodWorkAging
 
             foreach (var result in _results)
                 foreach (var size in result.Sizes)
-                    _grid.Rows.Add(Compact(size.HeightInches, size.HeightSooter),
-                                   Compact(size.WidthInches,  size.WidthSooter),
+                    _grid.Rows.Add(Compact(size.HeightInches, size.HeightSooter, size.HeightHalf),
+                                   Compact(size.WidthInches,  size.WidthSooter,  size.WidthHalf),
                                    size.Quantity.ToString(),
                                    size.SourceLine);
 
@@ -376,8 +376,8 @@ namespace GreenWoodWorkAging
                 var quantityCheck = _validator.ValidateQuantity(OrOne(quantity));
 
                 bool bothZero = heightParsed != null && widthParsed != null &&
-                                heightParsed.Inches == 0 && heightParsed.Sooter == 0 &&
-                                widthParsed.Inches  == 0 && widthParsed.Sooter  == 0;
+                                heightParsed.Inches == 0 && heightParsed.Sooter == 0 && heightParsed.Half == 0 &&
+                                widthParsed.Inches  == 0 && widthParsed.Sooter  == 0 && widthParsed.Half  == 0;
 
                 if (!heightCheck.IsValid || !widthCheck.IsValid || !quantityCheck.IsValid || bothZero)
                 {
@@ -391,7 +391,9 @@ namespace GreenWoodWorkAging
                 collected.Add(new ImportedSize
                 {
                     HeightInches = heightParsed!.Inches, HeightSooter = heightParsed.Sooter,
+                    HeightHalf   = heightParsed.Half,
                     WidthInches  = widthParsed!.Inches,  WidthSooter  = widthParsed.Sooter,
+                    WidthHalf    = widthParsed.Half,
                     Quantity     = int.Parse(OrOne(quantity)),
                     SourceLine   = CellText(row, 3)
                 });
@@ -432,7 +434,10 @@ namespace GreenWoodWorkAging
         private static string OrZero(string text) => text.Length == 0 ? "0" : text;
         private static string OrOne(string text)  => text.Length == 0 ? "1" : text;
 
-        private static string Compact(int inches, int sooter) => sooter == 0 ? $"{inches}" : $"{inches}.{sooter}";
+        // The same reading the bill window gives: the two digits the size was typed with.
+        private static readonly MeasurementDisplayFormatter Fmt = new();
+        private static string Compact(int inches, int sooter, int half = 0)
+            => Fmt.FormatCompact(inches, sooter, half);
 
         private static void PaintBorder(Graphics g, Control c)
         {

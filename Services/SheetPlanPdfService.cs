@@ -25,7 +25,7 @@ namespace GreenWoodWorkAging.Services
         static readonly PdfColor Paper     = Colors.White;
 
         private const int SheetImageWidth  = 240;   // points on the page
-        private const int SheetImageHeight = 480;   // a 4 ft × 8 ft sheet, so 1 : 2
+        private const int SheetImageHeight = 480;   // the tallest a 4 ft × 8 ft sheet may stand
 
         static readonly MeasurementDisplayFormatter Fmt = new();
 
@@ -76,7 +76,7 @@ namespace GreenWoodWorkAging.Services
                                 meta.Item().Text(t => t.Span("CUTTING PLAN").FontSize(10).Bold().FontColor(BrandDark));
                                 MetaRow("Customer", string.IsNullOrWhiteSpace(customer) ? "—" : customer);
                                 MetaRow("Date",    date.ToString("dd MMM yyyy"));
-                                MetaRow("Sheets",  $"{plan.Sheets.Count} × 8 ft × 4 ft");
+                                MetaRow("Sheets", SheetsValue(plan));
                                 if (bySource.Count > 0)
                                     MetaRow("From", bySource.Count == 1 ? bySource[0].Key
                                                                         : $"{bySource.Count} sheet codes");
@@ -112,15 +112,35 @@ namespace GreenWoodWorkAging.Services
                             col.Item().PaddingTop(6).Text(split).FontSize(8.5f).Bold().FontColor(BrandDark);
                         }
 
-                        if (plan.Unplaced.Count > 0)
-                            // No ⚠ here: the PDF font (Lato) has no such glyph and QuestPDF 2026.9
-                            // refuses to draw text it cannot render.
+                        if (plan.Stock.Count > 0)
+                            col.Item().PaddingTop(6).Text(StockUsageLine(plan)).FontSize(8.5f).FontColor(BrandDark);
+
+                        // Two different problems, two different fixes: a sheet too small for the
+                        // size, or the stock the shop counted running out.
+                        // No ⚠ here: the PDF font (Lato) has no such glyph and QuestPDF 2026.9
+                        // refuses to draw text it cannot render.
+                        var tooBig = plan.Unplaced.Where(u => u.Reason != UnplacedReason.OutOfStock).ToList();
+                        if (tooBig.Count > 0)
                             col.Item().PaddingTop(6).Text(
-                                $"NOTE: {plan.Unplaced.Count} piece(s) are larger than one sheet and are not on this plan.")
+                                $"NOTE: {tooBig.Count} piece(s) are larger than one sheet and are not on this plan.")
                                .FontSize(8.5f).Bold().FontColor(PdfColor.FromHex("#B32828"));
 
+                        var shortUp = plan.Shortfalls;
+                        if (shortUp.Count > 0)
+                        {
+                            string from = string.Join(", ",
+                                shortUp.Select(u => u.StockName).Where(n => n.Length > 0).Distinct());
+                            col.Item().PaddingTop(4).Text(
+                                $"NOTE: {shortUp.Count} piece(s) could not be cut — the stock entered" +
+                                (from.Length == 0 ? "" : $" ({from})") +
+                                " ran out. Buy more sheets or cut these from another stock.")
+                               .FontSize(8.5f).Bold().FontColor(PdfColor.FromHex("#B32828"));
+                        }
+
+                        bool mixed = MixedSizes(plan);
+
                         foreach (var sheet in plan.Sheets)
-                            col.Item().PaddingTop(16).PreventPageBreak().Row(row => Sheet(row, sheet));
+                            col.Item().PaddingTop(16).PreventPageBreak().Row(row => Sheet(row, sheet, mixed));
                     });
 
                     page.Footer().Column(col =>
@@ -147,10 +167,12 @@ namespace GreenWoodWorkAging.Services
 
         // ── One sheet ─────────────────────────────────────────────────────────
 
-        private static void Sheet(RowDescriptor row, SheetLayout sheet)
+        private static void Sheet(RowDescriptor row, SheetLayout sheet, bool mixedSizes)
         {
-            row.ConstantItem(SheetImageWidth).Height(SheetImageHeight)
-               .Image(RenderPng(sheet, SheetImageWidth * 3, SheetImageHeight * 3));
+            (int imageW, int imageH) = ImageBox(sheet);
+
+            row.ConstantItem(imageW).Height(imageH)
+               .Image(RenderPng(sheet, imageW * 3, imageH * 3));
 
             row.ConstantItem(16);
 
@@ -161,6 +183,13 @@ namespace GreenWoodWorkAging.Services
                     t.Span($"Sheet {sheet.Number}").FontSize(10).Bold().FontColor(Paper);
                     if (!string.IsNullOrWhiteSpace(sheet.Source))
                         t.Span($"   {sheet.Source}").FontSize(10).Bold().FontColor(PdfColor.FromHex("#BFE3CE"));
+                    else if (!string.IsNullOrWhiteSpace(sheet.StockName))
+                        t.Span($"   {sheet.StockName}").FontSize(10).Bold().FontColor(PdfColor.FromHex("#BFE3CE"));
+
+                    if (mixedSizes)
+                        t.Span($"   {SizeText(sheet.SheetHeightSixteenths, sheet.SheetWidthSixteenths)}")
+                         .FontSize(8.5f).FontColor(PdfColor.FromHex("#BFE3CE"));
+
                     t.Span($"      {sheet.Placements.Count} pieces · {sheet.UsedPercent:0.#}% used")
                      .FontSize(8.5f).FontColor(Paper);
                 });
@@ -190,8 +219,8 @@ namespace GreenWoodWorkAging.Services
                     foreach (var group in PiecesOn(sheet))
                     {
                         BodyCell(group.Serial.ToString());
-                        BodyCell(Fmt.FormatCompactFromEighths(group.HeightEighths));
-                        BodyCell(Fmt.FormatCompactFromEighths(group.WidthEighths));
+                        BodyCell(Fmt.FormatCompactFromSixteenths(group.HeightSixteenths));
+                        BodyCell(Fmt.FormatCompactFromSixteenths(group.WidthSixteenths));
                         BodyCell(group.Count.ToString());
                     }
 
@@ -207,14 +236,14 @@ namespace GreenWoodWorkAging.Services
         /// The sizes cut from one sheet, counted up. A piece turned 90° on the sheet is listed at
         /// the size it was ordered at, because that is the row the carpenter recognises.
         /// </summary>
-        private record SheetPieceGroup(int Serial, int HeightEighths, int WidthEighths, int Count);
+        private record SheetPieceGroup(int Serial, int HeightSixteenths, int WidthSixteenths, int Count);
 
         private static List<SheetPieceGroup> PiecesOn(SheetLayout sheet) =>
             sheet.Placements
                  .GroupBy(p => (
                      Serial:         p.SerialNumber,
-                     TypedHeight:    p.Rotated ? p.WidthEighths : p.HeightEighths,
-                     TypedWidth:     p.Rotated ? p.HeightEighths : p.WidthEighths))
+                     TypedHeight:    p.Rotated ? p.WidthSixteenths : p.HeightSixteenths,
+                     TypedWidth:     p.Rotated ? p.HeightSixteenths : p.WidthSixteenths))
                  .OrderBy(g => g.Key.Serial)
                  .Select(g => new SheetPieceGroup(g.Key.Serial, g.Key.TypedHeight, g.Key.TypedWidth, g.Count()))
                  .ToList();
@@ -229,6 +258,60 @@ namespace GreenWoodWorkAging.Services
             using var stream = new MemoryStream();
             bmp.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
             return stream.ToArray();
+        }
+
+        /// <summary>
+        /// The picture box for one sheet, in points. A 4 ft × 8 ft sheet fills the block it
+        /// always did; a square or a narrow sheet keeps its own shape instead of being printed
+        /// as plywood it is not.
+        /// </summary>
+        private static (int Width, int Height) ImageBox(SheetLayout sheet)
+        {
+            if (sheet.SheetWidthSixteenths <= 0 || sheet.SheetHeightSixteenths <= 0)
+                return (SheetImageWidth, SheetImageHeight);
+
+            double scale = Math.Min(SheetImageWidth  / (double)sheet.SheetWidthSixteenths,
+                                    SheetImageHeight / (double)sheet.SheetHeightSixteenths);
+
+            return ((int)Math.Round(sheet.SheetWidthSixteenths  * scale),
+                    (int)Math.Round(sheet.SheetHeightSixteenths * scale));
+        }
+
+        /// <summary>A sheet size in inches, the way the shop measures it.</summary>
+        private static string SizeText(int heightSixteenths, int widthSixteenths) =>
+            $"{heightSixteenths / (double)Sooter.PerInch:0.#} × {widthSixteenths / (double)Sooter.PerInch:0.#} in";
+
+        /// <summary>True when the plan is cut from more than one sheet size.</summary>
+        private static bool MixedSizes(OptimizationResult plan) =>
+            plan.Sheets.Select(s => (s.SheetWidthSixteenths, s.SheetHeightSixteenths)).Distinct().Count() > 1;
+
+        /// <summary>
+        /// The sheets line of the meta box. One size is named; several are not, because the only
+        /// honest headline then is the size each sheet block already carries.
+        /// </summary>
+        private static string SheetsValue(OptimizationResult plan) =>
+            plan.Sheets.Count == 0 ? "none"
+            : MixedSizes(plan) ? $"{plan.Sheets.Count}, in the sizes entered"
+                               : $"{plan.Sheets.Count} × {SizeText(plan.SheetHeightSixteenths, plan.SheetWidthSixteenths)}";
+
+        /// <summary>
+        /// How the counted stock was spent, so the shop reads the number of sheets to buy off the
+        /// plan instead of asking the carpenter.
+        /// </summary>
+        private static string StockUsageLine(OptimizationResult plan)
+        {
+            var parts = plan.Stock
+                            .Where(s => s.Used > 0 || s.ShortPieces > 0)
+                            .Select(s =>
+                            {
+                                string size = $"{s.HeightInches:0.#} × {s.WidthInches:0.#} in";
+                                string name = string.IsNullOrWhiteSpace(s.Name) ? size : $"{s.Name} ({size})";
+                                return $"{name}: " + (s.Unlimited
+                                    ? $"{s.Used} sheet{(s.Used == 1 ? "" : "s")}"
+                                    : $"{s.Used} of {s.Available} used");
+                            });
+
+            return "Stock used  ·  " + string.Join("     ", parts);
         }
     }
 }

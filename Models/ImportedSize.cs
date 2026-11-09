@@ -7,15 +7,23 @@ namespace GreenWoodWorkAging.Models
     {
         public int HeightInches { get; set; }
         public int HeightSooter { get; set; }
+
+        /// <summary>Half a sooter (a sady) on the height — 0 or 1.</summary>
+        public int HeightHalf { get; set; }
+
         public int WidthInches  { get; set; }
         public int WidthSooter  { get; set; }
+
+        /// <summary>Half a sooter (a sady) on the width — 0 or 1.</summary>
+        public int WidthHalf { get; set; }
+
         public int Quantity     { get; set; } = 1;
 
         /// <summary>The line the numbers were taken from, kept so the reading can be checked.</summary>
         public string SourceLine { get; set; } = "";
 
-        public int HeightEighths => HeightInches * 8 + HeightSooter;
-        public int WidthEighths  => WidthInches  * 8 + WidthSooter;
+        public int HeightSixteenths => Sooter.Combine(HeightInches, HeightSooter, HeightHalf);
+        public int WidthSixteenths  => Sooter.Combine(WidthInches,  WidthSooter,  WidthHalf);
     }
 
     /// <summary>What one image gave up: the sizes, the lines that made no sense, any error.</summary>

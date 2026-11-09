@@ -34,11 +34,11 @@ namespace GreenWoodWorkAging
             var m = Row(MeasurementSide.NoTape);
 
             Assert.Equal(0, m.TapeSides);
-            Assert.Equal(0, m.OnePieceEighths);
-            Assert.Equal(0, m.RowTotalEighths);
+            Assert.Equal(0, m.OnePieceSixteenths);
+            Assert.Equal(0, m.RowTotalSixteenths);
 
-            Assert.Equal(36 * 8, m.HeightEighths);
-            Assert.Equal(12 * 8, m.WidthEighths);
+            Assert.Equal(36 * Sooter.PerInch, m.HeightSixteenths);
+            Assert.Equal(12 * Sooter.PerInch, m.WidthSixteenths);
             Assert.Equal(2,      m.Quantity);
         }
 
@@ -53,7 +53,7 @@ namespace GreenWoodWorkAging
 
             var totals = new MeasurementCalculatorService().CalculateGrandTotal(rows);
 
-            Assert.Equal(192 * 8, totals.GrandTotalEighths);
+            Assert.Equal(192 * Sooter.PerInch, totals.GrandTotalSixteenths);
             Assert.Equal(5,       totals.TotalPieces);
             Assert.Equal(2,       totals.TotalRows);
         }

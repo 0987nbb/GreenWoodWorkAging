@@ -11,19 +11,27 @@ namespace GreenWoodWorkAging
     /// </summary>
     public class SheetCuttingOptimizerTests
     {
-        private const int SheetHeightEighths = 96 * 8;
-        private const int SheetWidthEighths  = 48 * 8;
+        private const int SheetHeightSixteenths = 96 * Sooter.PerInch;
+        private const int SheetWidthSixteenths  = 48 * Sooter.PerInch;
 
         private static readonly SheetCuttingOptimizer Opt = new();
 
-        /// <summary>A row written in eighth-inch units so the test maths stays exact.</summary>
-        private static MeasurementEntry Row(int serial, int heightEighths, int widthEighths, int qty) => new()
+        /// <summary>
+        /// A row written the way the shop says it — "89 * 8" is 89 inch, "16 * 8 + 2" is
+        /// 16 inch 2 sooter — converted to the sixteenth-inch units the packer works in.
+        /// </summary>
+        private static MeasurementEntry Row(int serial, int heightInEighths, int widthInEighths, int qty)
         {
-            SerialNumber = serial,
-            HeightInches = heightEighths / 8, HeightSooter = heightEighths % 8,
-            WidthInches  = widthEighths  / 8, WidthSooter  = widthEighths  % 8,
-            Quantity     = qty
-        };
+            var h = Sooter.Split(heightInEighths * Sooter.PerSooter);
+            var w = Sooter.Split(widthInEighths  * Sooter.PerSooter);
+            return new MeasurementEntry
+            {
+                SerialNumber = serial,
+                HeightInches = h.inches, HeightSooter = h.sooter, HeightHalf = h.half,
+                WidthInches  = w.inches, WidthSooter  = w.sooter, WidthHalf  = w.half,
+                Quantity     = qty
+            };
+        }
 
         private static List<MeasurementEntry> SampleBill() => new()
         {
@@ -83,7 +91,7 @@ namespace GreenWoodWorkAging
             Assert.Empty(plan.Sheets);
             var unplaced = Assert.Single(plan.Unplaced);
             Assert.Equal(7, unplaced.SerialNumber);
-            Assert.Equal(120 * 8, unplaced.HeightEighths);
+            Assert.Equal(120 * Sooter.PerInch, unplaced.HeightSixteenths);
         }
 
         [Fact]
@@ -105,15 +113,15 @@ namespace GreenWoodWorkAging
 
             foreach (var sheet in plan.Sheets)
             {
-                Assert.Equal(SheetWidthEighths,  sheet.SheetWidthEighths);
-                Assert.Equal(SheetHeightEighths, sheet.SheetHeightEighths);
+                Assert.Equal(SheetWidthSixteenths,  sheet.SheetWidthSixteenths);
+                Assert.Equal(SheetHeightSixteenths, sheet.SheetHeightSixteenths);
 
                 foreach (var p in sheet.Placements)
                 {
                     Assert.True(p.X >= 0 && p.Y >= 0,                      "piece off the sheet's origin");
-                    Assert.True(p.Right  <= sheet.SheetWidthEighths,       "piece past the sheet's right edge");
-                    Assert.True(p.Bottom <= sheet.SheetHeightEighths,      "piece past the sheet's bottom edge");
-                    Assert.True(p.Area == p.WidthEighths * p.HeightEighths);
+                    Assert.True(p.Right  <= sheet.SheetWidthSixteenths,       "piece past the sheet's right edge");
+                    Assert.True(p.Bottom <= sheet.SheetHeightSixteenths,      "piece past the sheet's bottom edge");
+                    Assert.True(p.Area == p.WidthSixteenths * p.HeightSixteenths);
                 }
 
                 foreach (var a in sheet.Placements)
@@ -125,8 +133,8 @@ namespace GreenWoodWorkAging
                 // Scrap must not cover a cut piece either.
                 foreach (var s in sheet.Scrap)
                     foreach (var p in sheet.Placements)
-                        Assert.True(s.X >= p.Right || p.X >= s.X + s.WidthEighths ||
-                                    s.Y >= p.Bottom || p.Y >= s.Y + s.HeightEighths,
+                        Assert.True(s.X >= p.Right || p.X >= s.X + s.WidthSixteenths ||
+                                    s.Y >= p.Bottom || p.Y >= s.Y + s.HeightSixteenths,
                                     "scrap sits on top of a piece");
 
                 Assert.True(sheet.UsedArea + sheet.Scrap.Sum(s => s.Area) <= sheet.SheetArea);
@@ -139,10 +147,10 @@ namespace GreenWoodWorkAging
             var rows = SampleBill();
             var plan = Opt.Optimize(rows);
 
-            var wanted = rows.SelectMany(r => Enumerable.Repeat((r.SerialNumber, r.HeightEighths * r.WidthEighths), r.Quantity))
+            var wanted = rows.SelectMany(r => Enumerable.Repeat((r.SerialNumber, r.HeightSixteenths * r.WidthSixteenths), r.Quantity))
                              .OrderBy(t => t.Item1).ThenBy(t => t.Item2).ToList();
             var placed = plan.Sheets.SelectMany(s => s.Placements)
-                             .Select(p => (p.SerialNumber, p.WidthEighths * p.HeightEighths))
+                             .Select(p => (p.SerialNumber, p.WidthSixteenths * p.HeightSixteenths))
                              .OrderBy(t => t.Item1).ThenBy(t => t.Item2).ToList();
 
             Assert.Equal(wanted, placed);
@@ -226,7 +234,7 @@ namespace GreenWoodWorkAging
             var plan = Opt.Optimize(ShopBill());
 
             var dead = plan.Sheets.SelectMany(s => s.Scrap)
-                             .Where(f => Math.Min(f.WidthEighths, f.HeightEighths) < 4 * 8)
+                             .Where(f => Math.Min(f.WidthSixteenths, f.HeightSixteenths) < 4 * Sooter.PerInch)
                              .ToList();
 
             Assert.Empty(dead);
@@ -265,8 +273,8 @@ namespace GreenWoodWorkAging
                 Assert.All(sheet.Placements, p =>
                 {
                     Assert.True(p.X >= 0 && p.Y >= 0);
-                    Assert.True(p.Right <= sheet.SheetWidthEighths);
-                    Assert.True(p.Bottom <= sheet.SheetHeightEighths);
+                    Assert.True(p.Right <= sheet.SheetWidthSixteenths);
+                    Assert.True(p.Bottom <= sheet.SheetHeightSixteenths);
                 });
 
                 foreach (var a in sheet.Placements)
@@ -277,8 +285,8 @@ namespace GreenWoodWorkAging
 
                 foreach (var offcut in sheet.Scrap)
                     Assert.All(sheet.Placements, p =>
-                        Assert.True(offcut.X >= p.Right || p.X >= offcut.X + offcut.WidthEighths ||
-                                    offcut.Y >= p.Bottom || p.Y >= offcut.Y + offcut.HeightEighths));
+                        Assert.True(offcut.X >= p.Right || p.X >= offcut.X + offcut.WidthSixteenths ||
+                                    offcut.Y >= p.Bottom || p.Y >= offcut.Y + offcut.HeightSixteenths));
 
                 Assert.True(sheet.UsedArea + sheet.Scrap.Sum(f => f.Area) <= sheet.SheetArea);
             }
@@ -295,16 +303,16 @@ namespace GreenWoodWorkAging
         /// </summary>
         private static int SheetsTheBillCouldNotDoWithLess(List<MeasurementEntry> rows)
         {
-            double sheetArea = (double)SheetHeightEighths * SheetWidthEighths;
-            int need = (int)Math.Ceiling(rows.Sum(r => (double)r.HeightEighths * r.WidthEighths * r.Quantity) / sheetArea);
+            double sheetArea = (double)SheetHeightSixteenths * SheetWidthSixteenths;
+            int need = (int)Math.Ceiling(rows.Sum(r => (double)r.HeightSixteenths * r.WidthSixteenths * r.Quantity) / sheetArea);
 
             foreach (var row in rows)
             {
-                int longest  = Math.Max(row.HeightEighths, row.WidthEighths);
-                int shortest = Math.Min(row.HeightEighths, row.WidthEighths);
+                int longest  = Math.Max(row.HeightSixteenths, row.WidthSixteenths);
+                int shortest = Math.Min(row.HeightSixteenths, row.WidthSixteenths);
 
-                int perSheet = Math.Max(SheetHeightEighths / longest * (SheetWidthEighths / shortest),
-                                        SheetHeightEighths / shortest * (SheetWidthEighths / longest));
+                int perSheet = Math.Max(SheetHeightSixteenths / longest * (SheetWidthSixteenths / shortest),
+                                        SheetHeightSixteenths / shortest * (SheetWidthSixteenths / longest));
                 if (perSheet > 0) need = Math.Max(need, (int)Math.Ceiling(row.Quantity / (double)perSheet));
             }
 

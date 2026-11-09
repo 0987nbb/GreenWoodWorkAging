@@ -33,8 +33,8 @@ namespace GreenWoodWorkAging.Models
 
     /// <summary>
     /// Represents a single carpenter measurement row with height, width, and quantity.
-    /// All measurements are stored internally as eighth-inch units (sooter units) to
-    /// guarantee exact integer arithmetic — no floating-point rounding ever occurs.
+    /// All measurements are stored internally as sixteenth-inch units — a sooter is two of
+    /// them — to guarantee exact integer arithmetic with no floating-point rounding.
     /// </summary>
     public class MeasurementEntry
     {
@@ -53,11 +53,20 @@ namespace GreenWoodWorkAging.Models
         /// <summary>Height fractional part in sooter (0–7). 1 inch = 8 sooter.</summary>
         public int HeightSooter { get; set; }
 
+        /// <summary>
+        /// Half a sooter (a sady) on top of the height's sooter count — 0 or 1. Every size
+        /// written before sady was typed has 0 here, which is why old bills still read the same.
+        /// </summary>
+        public int HeightHalf { get; set; }
+
         /// <summary>Width in whole inches.</summary>
         public int WidthInches { get; set; }
 
         /// <summary>Width fractional part in sooter (0–7).</summary>
         public int WidthSooter { get; set; }
+
+        /// <summary>Half a sooter (a sady) on top of the width's sooter count — 0 or 1.</summary>
+        public int WidthHalf { get; set; }
 
         /// <summary>Number of identical pieces (must be ≥ 1).</summary>
         public int Quantity { get; set; }
@@ -105,16 +114,16 @@ namespace GreenWoodWorkAging.Models
         /// <summary>Tape edges billed per piece — 0 for a piece that is cut but not taped.</summary>
         public int TapeSides => HeightSides + WidthSides;
 
-        public int HeightEighths   => HeightInches * 8 + HeightSooter;
-        public int WidthEighths    => WidthInches  * 8 + WidthSooter;
+        public int HeightSixteenths => Sooter.Combine(HeightInches, HeightSooter, HeightHalf);
+        public int WidthSixteenths  => Sooter.Combine(WidthInches,  WidthSooter,  WidthHalf);
 
         /// <summary>
         /// Length billed for one piece: the selected edges added together, so the
         /// default stays the original H+H+W+W four-sides rule.
         /// </summary>
-        public int OnePieceEighths => (HeightEighths * HeightSides) + (WidthEighths * WidthSides);
+        public int OnePieceSixteenths => (HeightSixteenths * HeightSides) + (WidthSixteenths * WidthSides);
 
         /// <summary>Row total = OnePiece × Quantity.</summary>
-        public int RowTotalEighths => OnePieceEighths * Quantity;
+        public int RowTotalSixteenths => OnePieceSixteenths * Quantity;
     }
 }

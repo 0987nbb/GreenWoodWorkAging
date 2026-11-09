@@ -4,25 +4,25 @@ namespace GreenWoodWorkAging.Services
 {
     /// <summary>
     /// Pure calculation service — no UI dependencies.
-    /// All arithmetic uses integer eighth-inch units to guarantee exact results.
+    /// All arithmetic uses integer sixteenth-inch units to guarantee exact results.
     /// </summary>
     public class MeasurementCalculatorService
     {
         // ── Row calculations ────────────────────────────────────────────────
 
         /// <summary>
-        /// Calculates the perimeter of one piece in eighth-inch units.
+        /// Calculates the perimeter of one piece in sixteenth-inch units.
         /// Carpenter's four-sides rule: H + H + W + W
         /// </summary>
-        public int CalculateOnePieceEighths(int heightEighths, int widthEighths)
-            => heightEighths + heightEighths + widthEighths + widthEighths;
+        public int CalculateOnePieceSixteenths(int heightSixteenths, int widthSixteenths)
+            => heightSixteenths + heightSixteenths + widthSixteenths + widthSixteenths;
 
         /// <summary>
-        /// Calculates the row total in eighth-inch units.
+        /// Calculates the row total in sixteenth-inch units.
         /// Row total = OnePiece × Quantity
         /// </summary>
-        public int CalculateRowTotalEighths(int onePieceEighths, int quantity)
-            => onePieceEighths * quantity;
+        public int CalculateRowTotalSixteenths(int onePieceSixteenths, int quantity)
+            => onePieceSixteenths * quantity;
 
         // ── Grand total calculations ─────────────────────────────────────────
 
@@ -32,13 +32,13 @@ namespace GreenWoodWorkAging.Services
         /// </summary>
         public GrandTotalResult CalculateGrandTotal(IEnumerable<MeasurementEntry> entries)
         {
-            int totalEighths = 0;
+            int totalSixteenths = 0;
             int totalPieces = 0;
             int totalRows = 0;
 
             foreach (var entry in entries)
             {
-                totalEighths += entry.RowTotalEighths;
+                totalSixteenths += entry.RowTotalSixteenths;
                 totalPieces += entry.Quantity;
                 totalRows++;
             }
@@ -47,21 +47,18 @@ namespace GreenWoodWorkAging.Services
             {
                 TotalRows = totalRows,
                 TotalPieces = totalPieces,
-                GrandTotalEighths = totalEighths
+                GrandTotalSixteenths = totalSixteenths
             };
         }
 
         // ── Conversion helpers ───────────────────────────────────────────────
 
         /// <summary>
-        /// Converts a raw eighth-inch value into its component parts.
+        /// Converts a raw sixteenth-inch value into its component parts: whole inches,
+        /// sooters (0–7) and the sady — half a sooter — left over.
         /// </summary>
-        public (int wholeInches, int sooter) EighthsToInchesAndSooter(int eighths)
-        {
-            int wholeInches = eighths / 8;
-            int sooter = eighths % 8;
-            return (wholeInches, sooter);
-        }
+        public (int wholeInches, int sooter, int half) SixteenthsToParts(int sixteenths)
+            => Sooter.Split(sixteenths);
 
         /// <summary>
         /// Converts a whole-inch count into feet and remaining inches.

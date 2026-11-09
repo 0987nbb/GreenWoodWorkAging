@@ -8,7 +8,8 @@ namespace GreenWoodWorkAging.Services
     /// default — so the shop buys the fewest sheets and keeps the least reusable offcut.
     ///
     /// Only straight, edge-to-edge (guillotine) cuts are produced, because that is what a
-    /// panel saw can actually do. Every measurement stays in eighths of an inch.
+    /// panel saw can actually do. Every measurement stays in sixteenths of an inch, so a
+    /// size typed with a sady is placed at the length it really is.
     ///
     /// A greedy best-fit packer is easily fooled by the order the sizes arrive in, so five
     /// things are done about it:
@@ -34,10 +35,10 @@ namespace GreenWoodWorkAging.Services
         public const int DefaultSheetHeightInches = 96;   // 8 ft
         public const int DefaultSheetWidthInches  = 48;   // 4 ft
 
-        private const int EighthsPerInch = 8;
+        private const int SixteenthsPerInch = Sooter.PerInch;
 
         /// <summary>An offcut narrower than this across is firewood, not stock.</summary>
-        private const int MinReusableEighths = 4 * EighthsPerInch;
+        private const int MinReusableSixteenths = 4 * SixteenthsPerInch;
 
         /// <summary>How strongly dead scrap counts against a placement.</summary>
         private const int DeadWeight = 2;
@@ -49,19 +50,53 @@ namespace GreenWoodWorkAging.Services
         private const int BeamWidth        = 64;
 
         /// <summary>How long one bill may be searched before the greedy answer is kept.</summary>
-        private const int SearchBudgetMs = 900;
+        private const int SearchBudgetMs = 1500;
 
         /// <summary>Piece orders worth searching; the rest only feed the greedy runs.</summary>
         private const int SearchedOrders = 2;
 
+        /// <summary>
+        /// One sheet the shop says it has, typed before the plan is made: what it is called,
+        /// how wide and tall it is, and how many are on the floor. A quantity of 0 means the
+        /// shop did not count them, which is how every plan was cut before this question existed.
+        /// </summary>
+        public sealed record StockSheet(string Name, int WidthInches, int HeightInches, int Quantity = 0)
+        {
+            /// <summary>The standard 8 ft × 4 ft plywood sheet, with no count against it.</summary>
+            public static StockSheet Standard(string name = "") =>
+                new(name, DefaultSheetWidthInches, DefaultSheetHeightInches, 0);
+
+            public bool IsStandardSize => WidthInches == DefaultSheetWidthInches &&
+                                          HeightInches == DefaultSheetHeightInches;
+        }
+
         private readonly int _sheetH;
         private readonly int _sheetW;
 
+        /// <summary>Sheets this run may open. int.MaxValue when the shop did not say how many.</summary>
+        private int _maxSheets;
+
         public SheetCuttingOptimizer(int sheetHeightInches = DefaultSheetHeightInches,
-                                     int sheetWidthInches  = DefaultSheetWidthInches)
+                                     int sheetWidthInches  = DefaultSheetWidthInches,
+                                     int sheetQuantity     = 0)
         {
-            _sheetH = sheetHeightInches * EighthsPerInch;
-            _sheetW = sheetWidthInches  * EighthsPerInch;
+            _sheetH = sheetHeightInches * SixteenthsPerInch;
+            _sheetW = sheetWidthInches  * SixteenthsPerInch;
+
+            // A count of 0 or less is "not counted", so the packer never runs out of sheets.
+            _maxSheets = sheetQuantity > 0 ? sheetQuantity : int.MaxValue;
+        }
+
+        /// <summary>
+        /// A packer set to one stock sheet. <paramref name="sheetsLeft"/> is null when the shop
+        /// never counted that stock — and zero when it counted and they are all gone, which is
+        /// not the same thing.
+        /// </summary>
+        private static SheetCuttingOptimizer For(StockSheet stock, int? sheetsLeft)
+        {
+            var packer = new SheetCuttingOptimizer(stock.HeightInches, stock.WidthInches);
+            packer._maxSheets = sheetsLeft ?? int.MaxValue;
+            return packer;
         }
 
         public OptimizationResult Optimize(IEnumerable<MeasurementEntry> rows)
@@ -93,12 +128,12 @@ namespace GreenWoodWorkAging.Services
                 if (best == null || IsBetter(plan, best)) best = plan;
             }
 
-            best ??= new Plan(new List<OpenSheet>(), new List<Piece>());
+            best ??= new Plan(new List<OpenSheet>(), new List<Piece>(), new List<Piece>());
 
             var result = new OptimizationResult
             {
-                SheetWidthEighths  = _sheetW,
-                SheetHeightEighths = _sheetH
+                SheetWidthSixteenths  = _sheetW,
+                SheetHeightSixteenths = _sheetH
             };
 
             foreach (var sheet in best.Sheets)
@@ -110,9 +145,21 @@ namespace GreenWoodWorkAging.Services
             foreach (var p in best.Unplaced)
                 result.Unplaced.Add(new UnplacedPiece
                 {
-                    SerialNumber  = p.Serial,
-                    HeightEighths = p.H,
-                    WidthEighths  = p.W
+                    SerialNumber     = p.Serial,
+                    HeightSixteenths = p.H,
+                    WidthSixteenths  = p.W,
+                    Reason           = UnplacedReason.TooBigForSheet
+                });
+
+            // A piece that would fit but had no sheet left to go on is the shop's problem to
+            // solve — buy more, or cut it from another stock — so it is reported apart.
+            foreach (var p in best.Starved)
+                result.Unplaced.Add(new UnplacedPiece
+                {
+                    SerialNumber     = p.Serial,
+                    HeightSixteenths = p.H,
+                    WidthSixteenths  = p.W,
+                    Reason           = UnplacedReason.OutOfStock
                 });
 
             return result;
@@ -122,30 +169,109 @@ namespace GreenWoodWorkAging.Services
         /// Pack the bill one sheet code at a time, so a piece of "KMI 123" never lands on a
         /// sheet of Super Glass. Sizes that were never given a code form one unnamed group,
         /// and a bill with a single group packs exactly like <see cref="Optimize"/>.
+        ///
+        /// With a stock list the sizes of the sheets come from it instead of the 8 ft × 4 ft
+        /// default, and the count entered is spent as the plan opens sheets: a group whose
+        /// stock runs out reports the pieces it could not cut rather than buying a sheet the
+        /// shop does not have. Without one, nothing about the plan changes.
         /// </summary>
-        public OptimizationResult OptimizeBySheetCode(IEnumerable<MeasurementEntry> rows)
+        public OptimizationResult OptimizeBySheetCode(IEnumerable<MeasurementEntry> rows,
+                                                      IReadOnlyList<StockSheet>? stock = null)
         {
             var all = rows.ToList();
             var combined = new OptimizationResult
             {
-                SheetWidthEighths  = _sheetW,
-                SheetHeightEighths = _sheetH
+                SheetWidthSixteenths  = _sheetW,
+                SheetHeightSixteenths = _sheetH
             };
+
+            if (stock == null || stock.Count == 0)
+            {
+                int plain = 1;
+                foreach (var group in all.GroupBy(r => r.SheetCode ?? ""))
+                {
+                    var one = Optimize(group);
+                    foreach (var sheet in one.Sheets)
+                    {
+                        sheet.Number = plain++;
+                        sheet.Source = group.Key;
+                        combined.Sheets.Add(sheet);
+                    }
+                    combined.Unplaced.AddRange(one.Unplaced);
+                }
+
+                return combined;
+            }
+
+            var usages = stock.Select(s => new StockUsage
+            {
+                Name         = s.Name,
+                WidthInches  = s.WidthInches,
+                HeightInches = s.HeightInches,
+                Available    = s.Quantity
+            }).ToList();
+
+            // Sheets still unspent, per stock row. An uncounted row is never spent out.
+            var counted   = stock.Select(s => s.Quantity > 0).ToArray();
+            var remaining = stock.Select(s => s.Quantity).ToArray();
 
             int number = 1;
             foreach (var group in all.GroupBy(r => r.SheetCode ?? ""))
             {
-                var one = Optimize(group);
+                int pick = PickStock(group.Key, stock);
+                var sheetStock = stock[pick];
+
+                var packer = For(sheetStock, counted[pick] ? remaining[pick] : null);
+                var one    = packer.Optimize(group);
+
+                usages[pick].Used += one.Sheets.Count;
+                if (counted[pick])
+                    remaining[pick] = Math.Max(0, remaining[pick] - one.Sheets.Count);
+
                 foreach (var sheet in one.Sheets)
                 {
-                    sheet.Number = number++;
-                    sheet.Source = group.Key;
+                    sheet.Number    = number++;
+                    sheet.Source    = group.Key;
+                    sheet.StockName = sheetStock.Name;
                     combined.Sheets.Add(sheet);
                 }
-                combined.Unplaced.AddRange(one.Unplaced);
+
+                foreach (var left in one.Unplaced)
+                {
+                    left.StockName = sheetStock.Name;
+                    combined.Unplaced.Add(left);
+                    if (left.Reason == UnplacedReason.OutOfStock) usages[pick].ShortPieces++;
+                }
             }
 
+            combined.Stock.AddRange(usages);
+
+            // The first stock row is the one the plan window draws its headline from; a plan
+            // cut from several sizes still says so sheet by sheet.
+            combined.SheetWidthSixteenths  = stock[0].WidthInches  * SixteenthsPerInch;
+            combined.SheetHeightSixteenths = stock[0].HeightInches * SixteenthsPerInch;
+
             return combined;
+        }
+
+        /// <summary>
+        /// Which stock row a sheet code should be cut from: the row the shop named after the
+        /// same sheet, and failing that the first row — the one a shop fills in when it only
+        /// has one kind of plywood on the floor.
+        /// </summary>
+        private static int PickStock(string sheetCode, IReadOnlyList<StockSheet> stock)
+        {
+            string code = (sheetCode ?? "").Trim();
+
+            if (code.Length > 0)
+                for (int i = 0; i < stock.Count; i++)
+                    if (string.Equals(stock[i].Name.Trim(), code, StringComparison.OrdinalIgnoreCase))
+                        return i;
+
+            for (int i = 0; i < stock.Count; i++)
+                if (stock[i].Name.Trim().Length == 0) return i;
+
+            return 0;
         }
 
         // ── Packing ──────────────────────────────────────────────────────────
@@ -154,6 +280,7 @@ namespace GreenWoodWorkAging.Services
         {
             var sheets   = new List<OpenSheet>();
             var unplaced = new List<Piece>();
+            var starved  = new List<Piece>();
 
             foreach (var piece in order)
             {
@@ -167,6 +294,14 @@ namespace GreenWoodWorkAging.Services
 
                 if (target == null)
                 {
+                    // The shop said how many sheets it has. Opening one it does not have would
+                    // print a plan the carpenter cannot cut, so the piece is left for them to see.
+                    if (sheets.Count >= _maxSheets)
+                    {
+                        starved.Add(piece);
+                        continue;
+                    }
+
                     target = new OpenSheet(sheets.Count + 1, _sheetW, _sheetH);
                     sheets.Add(target);
                     spot = target.FindSpot(piece);
@@ -175,7 +310,7 @@ namespace GreenWoodWorkAging.Services
                 target.Place(piece, spot!);
             }
 
-            return new Plan(sheets, unplaced);
+            return new Plan(sheets, unplaced, starved);
         }
 
         /// <summary>The cheapest position for one piece over every open sheet.</summary>
@@ -232,7 +367,10 @@ namespace GreenWoodWorkAging.Services
                     foreach (var (sheet, spot) in CandidateSpots(state.Sheets, piece, branches))
                         next.Add(state.PlaceOn(sheet, spot, piece, _sheetW, _sheetH));
 
-                    next.Add(state.StartNewSheet(piece, _sheetW, _sheetH));
+                    // A branch that would have to open a sheet the shop does not have is not a
+                    // plan, so it is dropped; if every branch dies, the greedy answer stands.
+                    if (state.Sheets.Count < _maxSheets)
+                        next.Add(state.StartNewSheet(piece, _sheetW, _sheetH));
                 }
 
                 if (next.Count == 0) return null;
@@ -406,9 +544,9 @@ namespace GreenWoodWorkAging.Services
             var list = new List<Piece>();
             foreach (var row in rows)
             {
-                if (row.HeightEighths <= 0 || row.WidthEighths <= 0) continue;
+                if (row.HeightSixteenths <= 0 || row.WidthSixteenths <= 0) continue;
                 for (int i = 0; i < row.Quantity; i++)
-                    list.Add(new Piece(row.SerialNumber, row.HeightEighths, row.WidthEighths));
+                    list.Add(new Piece(row.SerialNumber, row.HeightSixteenths, row.WidthSixteenths));
             }
             return list;
         }
@@ -501,7 +639,7 @@ namespace GreenWoodWorkAging.Services
             }
 
             private static int DeadOf(Rect r) =>
-                r.W <= 0 || r.H <= 0 ? 0 : Math.Min(r.W, r.H) < MinReusableEighths ? r.Area : 0;
+                r.W <= 0 || r.H <= 0 ? 0 : Math.Min(r.W, r.H) < MinReusableSixteenths ? r.Area : 0;
 
             /// <summary>
             /// The plywood left in the block after the piece is sawn out of it. Two straight
@@ -538,8 +676,8 @@ namespace GreenWoodWorkAging.Services
                 SerialNumber   = piece.Serial,
                 X              = X,
                 Y              = Y,
-                WidthEighths   = W,
-                HeightEighths  = H,
+                WidthSixteenths   = W,
+                HeightSixteenths  = H,
                 Rotated        = Rotated
             };
         }
@@ -553,21 +691,21 @@ namespace GreenWoodWorkAging.Services
             /// <summary>Everything placed here, in the order it was placed, for a replay.</summary>
             public List<PlacedPiece> Placed { get; } = new();
 
-            public OpenSheet(int number, int widthEighths, int heightEighths)
+            public OpenSheet(int number, int widthSixteenths, int heightSixteenths)
             {
                 Layout = new SheetLayout
                 {
                     Number              = number,
-                    SheetWidthEighths   = widthEighths,
-                    SheetHeightEighths  = heightEighths
+                    SheetWidthSixteenths   = widthSixteenths,
+                    SheetHeightSixteenths  = heightSixteenths
                 };
-                _free.Add(new Rect(0, 0, widthEighths, heightEighths));
+                _free.Add(new Rect(0, 0, widthSixteenths, heightSixteenths));
             }
 
             /// <summary>A fresh sheet with the same pieces put back exactly where they were.</summary>
-            public static OpenSheet Rebuild(OpenSheet source, int widthEighths, int heightEighths)
+            public static OpenSheet Rebuild(OpenSheet source, int widthSixteenths, int heightSixteenths)
             {
-                var copy = new OpenSheet(source.Layout.Number, widthEighths, heightEighths);
+                var copy = new OpenSheet(source.Layout.Number, widthSixteenths, heightSixteenths);
                 foreach (var placed in source.Placed)
                 {
                     // The replay follows the same splits and the same merges, so the block each
@@ -584,10 +722,10 @@ namespace GreenWoodWorkAging.Services
             public IEnumerable<ScrapRect> Scrap =>
                 _free.Where(f => f.Area > 0)
                      .OrderByDescending(f => f.Area)
-                     .Select(f => new ScrapRect { X = f.X, Y = f.Y, WidthEighths = f.W, HeightEighths = f.H });
+                     .Select(f => new ScrapRect { X = f.X, Y = f.Y, WidthSixteenths = f.W, HeightSixteenths = f.H });
 
             /// <summary>Offcut left here that is too narrow to keep for a future bill.</summary>
-            public int DeadArea => _free.Where(f => Math.Min(f.W, f.H) < MinReusableEighths)
+            public int DeadArea => _free.Where(f => Math.Min(f.W, f.H) < MinReusableSixteenths)
                                         .Sum(f => f.Area);
 
             /// <summary>
@@ -654,8 +792,8 @@ namespace GreenWoodWorkAging.Services
                     SerialNumber  = piece.Serial,
                     X             = x,
                     Y             = y,
-                    WidthEighths  = w,
-                    HeightEighths = h,
+                    WidthSixteenths  = w,
+                    HeightSixteenths = h,
                     Rotated       = rotated
                 });
                 Placed.Add(new PlacedPiece(piece, free, freeIndex, x, y, w, h, rotated));
@@ -733,19 +871,19 @@ namespace GreenWoodWorkAging.Services
 
             public string Signature => Sheets.Count + ": " + string.Join(" / ", Sheets.Select(s => s.Signature));
 
-            public State PlaceOn(OpenSheet target, Spot spot, Piece piece, int widthEighths, int heightEighths)
+            public State PlaceOn(OpenSheet target, Spot spot, Piece piece, int widthSixteenths, int heightSixteenths)
             {
                 var sheets = new List<OpenSheet>(Sheets);
-                var copy   =  OpenSheet.Rebuild(target, widthEighths, heightEighths);
+                var copy   =  OpenSheet.Rebuild(target, widthSixteenths, heightSixteenths);
                 copy.Place(piece, spot);
                 sheets[sheets.IndexOf(target)] = copy;
 
                 return new State(sheets, sheets.Sum(s => s.DeadArea));
             }
 
-            public State StartNewSheet(Piece piece, int widthEighths, int heightEighths)
+            public State StartNewSheet(Piece piece, int widthSixteenths, int heightSixteenths)
             {
-                var fresh = new OpenSheet(Sheets.Count + 1, widthEighths, heightEighths);
+                var fresh = new OpenSheet(Sheets.Count + 1, widthSixteenths, heightSixteenths);
                 fresh.Place(piece, fresh.FindSpot(piece)!);
 
                 var sheets = new List<OpenSheet>(Sheets) { fresh };
@@ -763,12 +901,18 @@ namespace GreenWoodWorkAging.Services
         private sealed class Plan
         {
             public List<OpenSheet> Sheets { get; }
+
+            /// <summary>Pieces bigger than any sheet, in any direction.</summary>
             public List<Piece> Unplaced { get; }
 
-            public Plan(List<OpenSheet> sheets, List<Piece> unplaced)
+            /// <summary>Pieces that would fit a sheet, with none of the entered stock left to cut.</summary>
+            public List<Piece> Starved { get; }
+
+            public Plan(List<OpenSheet> sheets, List<Piece> unplaced, List<Piece>? starved = null)
             {
                 Sheets   = sheets;
                 Unplaced = unplaced;
+                Starved  = starved ?? new List<Piece>();
             }
 
             public int LastSheetUsed => Sheets.Count == 0 ? 0 : Sheets[^1].Layout.UsedArea;

@@ -5,8 +5,9 @@ namespace GreenWoodWorkAging.Services
 {
     /// <summary>
     /// Turns the plain text read off a written or printed size list into measurement rows.
-    /// Everything works in eighth-inch (sooter) units so a reading like "79.7" means exactly
-    /// what the manual entry box means: 79 inches + 7 sooter.
+    /// Everything works in sixteenth-inch units — a sooter is two of them — so a reading like
+    /// "79.7" means exactly what the manual entry box means: 79 inches + 7 sooter, and "8.19"
+    /// means 8 inches + 1½ sooter.
     ///
     /// Accepted per line/segment, in the shop's usual order:
     ///   89 x 24            → height, width, qty 1
@@ -85,16 +86,16 @@ namespace GreenWoodWorkAging.Services
 
             if (values.Count == 2)
             {
-                height = values[0].Eighths;
-                width  = values[1].Eighths;
+                height = values[0].Sixteenths;
+                width  = values[1].Sixteenths;
                 quantity = 1;
             }
             else if (values.Count == 3)
             {
-                height = values[0].Eighths;
-                width  = values[1].Eighths;
+                height = values[0].Sixteenths;
+                width  = values[1].Sixteenths;
                 if (!values[2].IsPlainWhole) return null;
-                quantity = values[2].Eighths / 8;
+                quantity = values[2].Sixteenths / Sooter.PerInch;
                 if (quantity < MinQuantity || quantity > MaxQuantity) return null;
             }
             else
@@ -106,24 +107,28 @@ namespace GreenWoodWorkAging.Services
 
             if (!IsUsableDimension(height) || !IsUsableDimension(width)) return null;
 
+            var (hi, hs, hh) = Sooter.Split(height);
+            var (wi, ws, wh) = Sooter.Split(width);
+
             return new ImportedSize
             {
-                HeightInches = height / 8, HeightSooter = height % 8,
-                WidthInches  = width  / 8, WidthSooter  = width  % 8,
+                HeightInches = hi, HeightSooter = hs, HeightHalf = hh,
+                WidthInches  = wi, WidthSooter  = ws, WidthHalf  = wh,
                 Quantity     = quantity,
                 SourceLine   = segment
             };
         }
 
-        private static bool IsUsableDimension(int eighths)
-            => eighths >= MinDimensionInches * 8 && eighths <= MaxDimensionInches * 8;
+        private static bool IsUsableDimension(int sixteenths)
+            => sixteenths >= MinDimensionInches * Sooter.PerInch &&
+               sixteenths <= MaxDimensionInches * Sooter.PerInch;
 
         // ── Number reading ───────────────────────────────────────────────────
 
         private struct Value
         {
-            /// <summary>Length in eighth-inch (sooter) units.</summary>
-            public int Eighths;
+            /// <summary>Length in sixteenth-inch units — two of them make one sooter.</summary>
+            public int Sixteenths;
 
             /// <summary>True for a bare "2" — only such a token can be read as the quantity.</summary>
             public bool IsPlainWhole;
@@ -149,8 +154,8 @@ namespace GreenWoodWorkAging.Services
                 {
                     int previous = values.Count - 1;
                     Value merged = values[previous];
-                    merged.Eighths      += value.Value.Eighths;
-                    merged.IsPlainWhole  = false;
+                    merged.Sixteenths += value.Value.Sixteenths;
+                    merged.IsPlainWhole = false;
                     values[previous] = merged;
                     continue;
                 }
@@ -178,7 +183,7 @@ namespace GreenWoodWorkAging.Services
 
                 return new Value
                 {
-                    Eighths = (int)Math.Round(numerator * 8.0 / denominator),
+                    Sixteenths = (int)Math.Round(numerator * (double)Sooter.PerInch / denominator),
                     IsFractionOnly = true
                 };
             }
@@ -187,29 +192,15 @@ namespace GreenWoodWorkAging.Services
             if (dot < 0)
             {
                 if (!int.TryParse(token, out int inches)) return null;
-                return new Value { Eighths = inches * 8, IsPlainWhole = true };
+                return new Value { Sixteenths = inches * Sooter.PerInch, IsPlainWhole = true };
             }
 
-            string wholePart = token[..dot];
-            string afterDot  = token[(dot + 1)..];
+            // The same reading rule the entry box uses: one digit is a sooter count, two or
+            // more are the decimal inch off a tape, landing on the nearest half-sooter.
+            if (!MeasurementInputValidator.TryReadSixteenths(token.Replace(',', '.'), out int units))
+                return null;
 
-            if (!int.TryParse(wholePart, out int whole)) return null;
-            if (!int.TryParse(afterDot, out int fractionDigits)) return null;
-
-            // One digit after the point is the app's sooter convention: "79.7" = 79 in 7 sooter.
-            if (afterDot.Length == 1 && fractionDigits <= 7)
-                return new Value { Eighths = whole * 8 + fractionDigits };
-
-            // Anything else is written in decimal inches: "79.75" → 79 in 6 sooter.
-            decimal asInches = whole + (decimal)fractionDigits / PowerOfTen(afterDot.Length);
-            return new Value { Eighths = (int)Math.Round(asInches * 8m) };
-        }
-
-        private static int PowerOfTen(int digits)
-        {
-            int result = 1;
-            for (int i = 0; i < digits; i++) result *= 10;
-            return result;
+            return new Value { Sixteenths = units };
         }
     }
 }

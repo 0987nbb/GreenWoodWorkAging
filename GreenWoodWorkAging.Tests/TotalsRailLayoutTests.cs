@@ -68,6 +68,63 @@ namespace GreenWoodWorkAging.Tests
                         $"The totals band is still {bandAfter.Height:F0} tall.");
         }
 
+        /// <summary>
+        /// A laptop at the smallest window the app allows used to show the list's header and
+        /// nothing under it: the four cards around it asked for every pixel. The cards can now
+        /// scroll out of the way, but the measurements always keep room to work in.
+        /// </summary>
+        [Fact]
+        public void TheShortWindow_StillShowsSeveralSizes()
+        {
+            Exception? failure = null;
+            int visibleRows = 0;
+            bool chargesReachableByScrolling = false;
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    using var form = new CarpenterMeasurementCalculatorForm();
+                    form.WindowState = FormWindowState.Normal;
+                    form.Size = new Size(1280, 780);       // the MinimumSize in the code
+                    form.Show();
+                    for (int i = 0; i < 40; i++) Application.DoEvents();
+
+                    var list = (List<GreenWoodWorkAging.Models.MeasurementEntry>)
+                        Form.GetField("_measurements", Private)!.GetValue(form)!;
+                    for (int i = 1; i <= 12; i++)
+                        list.Add(new GreenWoodWorkAging.Models.MeasurementEntry
+                        {
+                            SerialNumber = i, HeightInches = 30 + i, WidthInches = 20, Quantity = 1
+                        });
+                    Form.GetMethod("RefreshGrid", Private)!.Invoke(form, null);
+                    for (int i = 0; i < 40; i++) Application.DoEvents();
+
+                    var grid = AllControls(form).OfType<DataGridView>().Single();
+                    visibleRows = grid.DisplayedRowCount(false);
+
+                    var body = (Panel)Form.GetField("_bodyPanel", Private)!.GetValue(form)!;
+                    chargesReachableByScrolling =
+                        // A scroll bar whose range covers the whole stack of cards, and a list that
+                        // keeps its own room at the top of it.
+                        body.AutoScroll &&
+                        body.AutoScrollMinSize.Height > body.ClientSize.Height &&
+                        grid.Height >= 200;
+                    form.Close();
+                }
+                catch (Exception ex) { failure = ex; }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            Assert.True(thread.Join(TimeSpan.FromSeconds(90)), "The layout never settled.");
+
+            Assert.Null(failure);
+            Assert.True(visibleRows >= 5,
+                        $"a full bill showed only {visibleRows} of its 12 sizes at the smallest window");
+            Assert.True(chargesReachableByScrolling,
+                        "scrolling the short window never brings the bill charges card into view");
+        }
+
         private static IEnumerable<Control> AllControls(Control root)
         {
             foreach (Control c in root.Controls)

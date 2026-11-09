@@ -26,6 +26,7 @@
 
   <!-- Link source files from the parent project (the form itself stays out) -->
   <ItemGroup>
+    <Compile Include="..\Models\Sooter.cs" Link="Models\Sooter.cs" />
     <Compile Include="..\Models\MeasurementEntry.cs" Link="Models\MeasurementEntry.cs" />
     <Compile Include="..\Models\GrandTotalResult.cs" Link="Models\GrandTotalResult.cs" />
     <Compile Include="..\Models\BillCharges.cs" Link="Models\BillCharges.cs" />
@@ -50,6 +51,7 @@
     <!-- Only the two review windows, so their layout can be rendered and looked at. -->
     <Compile Include="..\SheetOptimizerForm.cs" Link="SheetOptimizerForm.cs" />
     <Compile Include="..\SheetStockForm.cs" Link="SheetStockForm.cs" />
+    <Compile Include="..\SheetStockPickForm.cs" Link="SheetStockPickForm.cs" />
     <Compile Include="..\ManualInvoiceForm.cs" Link="ManualInvoiceForm.cs" />
     <Compile Include="..\CarpenterMeasurementCalculatorForm.cs" Link="CarpenterMeasurementCalculatorForm.cs" />
     <Compile Include="..\Services\SizeListParser.cs" Link="Services\SizeListParser.cs" />

@@ -18,15 +18,15 @@ namespace GreenWoodWorkAging.Models
         /// <summary>Rate charged per sheet cut.</summary>
         public decimal RatePerSheet { get; set; }
 
-        /// <summary>1 foot = 12 inch = 96 sooter.</summary>
-        public static decimal FeetFromEighths(int totalEighths) => totalEighths / 96m;
+        /// <summary>1 foot = 12 inch = 96 sooter = 192 half-sooter units.</summary>
+        public static decimal FeetFromSixteenths(int totalSixteenths) => totalSixteenths / (decimal)Sooter.PerFoot;
 
         /// <summary>Total feet of tape billed, to two decimals.</summary>
-        public static decimal Feet(int totalEighths) => decimal.Round(FeetFromEighths(totalEighths), 2);
+        public static decimal Feet(int totalSixteenths) => decimal.Round(FeetFromSixteenths(totalSixteenths), 2);
 
-        public decimal TapeAmount(int totalEighths)   => decimal.Round(FeetFromEighths(totalEighths) * RatePerFoot, 2);
-        public decimal SheetAmount                    => SheetCuts * RatePerSheet;
-        public decimal TotalAmount(int totalEighths)  => TapeAmount(totalEighths) + CarriageFare + SheetAmount;
+        public decimal TapeAmount(int totalSixteenths)   => decimal.Round(FeetFromSixteenths(totalSixteenths) * RatePerFoot, 2);
+        public decimal SheetAmount                       => SheetCuts * RatePerSheet;
+        public decimal TotalAmount(int totalSixteenths)  => TapeAmount(totalSixteenths) + CarriageFare + SheetAmount;
 
         public bool IsEmpty => RatePerFoot == 0 && CarriageFare == 0 && SheetCuts == 0 && RatePerSheet == 0;
 

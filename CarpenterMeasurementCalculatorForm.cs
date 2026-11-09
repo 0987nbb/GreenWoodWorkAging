@@ -55,6 +55,13 @@ namespace GreenWoodWorkAging
         private Button         btnCancel       = null!;
         private Button         btnImportImages = null!;
         private DataGridView   dgv             = null!;
+
+        /// <summary>
+        /// Which measurement each grid row shows. Rows that separate two sheet blocks are not
+        /// measurements at all, so they map to -1 and every click handler goes through here
+        /// instead of trusting the row number.
+        /// </summary>
+        private readonly List<int> _gridRowToMeasurement = new();
         private Label          lblTotalRows    = null!;
         private Label          lblTotalPieces  = null!;
         private Label          lblGrandTotal   = null!;
@@ -68,9 +75,11 @@ namespace GreenWoodWorkAging
         private TableLayoutPanel _tilesBand = null!;
         private TableLayoutPanel _tilesRail = null!;
         private readonly Panel[] _tiles     = new Panel[4];
-        private RowStyle       _bandRow     = null!;
-        private ColumnStyle    _railColumn  = null!;
-        private bool           _tilesInRail;
+        private RowStyle         _bandRow     = null!;
+        private ColumnStyle      _railColumn  = null!;
+        private bool             _tilesInRail;
+        private TableLayoutPanel _bodyTable   = null!;
+        private Panel            _bodyPanel   = null!;
 
         // ── Controls — bill charges (money) ───────────────────────────────────
         private NumericUpDown nudRateFoot   = null!;
@@ -791,7 +800,16 @@ namespace GreenWoodWorkAging
 
         private Panel BuildBody()
         {
-            var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(18, 12, 18, 12), BackColor = CBg };
+            // AutoScroll is the mechanism; KeepListVisible decides when the cards are actually
+            // too tall for the screen and the scroll bar is needed.
+            var body = new Panel
+            {
+                Dock       = DockStyle.Fill,
+                Padding    = new Padding(18, 12, 18, 12),
+                BackColor  = CBg,
+                AutoScroll = true
+            };
+            body.Resize += (_, _) => KeepListVisible();
 
             var tbl = new TableLayoutPanel
             {
@@ -801,6 +819,7 @@ namespace GreenWoodWorkAging
                 BackColor   = CBg,
                 Margin      = new Padding(0)
             };
+            _bodyTable = tbl;
             // Built by the builders below, each of which knows what its own rows need; the
             // hand-picked pixel heights only fit at 100% Windows scaling.
             var inputCard   = BuildInputCard();
@@ -818,7 +837,29 @@ namespace GreenWoodWorkAging
             tbl.Controls.Add(chargesCard,        0, 3);
 
             body.Controls.Add(tbl);
+            _bodyPanel = body;
+            KeepListVisible();
             return body;
+        }
+
+        /// <summary>
+        /// The measurement list is the part of the window a shop works in, so a screen too short
+        /// for all four cards scrolls the cards away rather than squeezing the list down to its
+        /// header. A normal window is tall enough that the scroll bar never appears.
+        /// </summary>
+        private void KeepListVisible()
+        {
+            const int listFloor = 320;   // about six sizes, plus the strip of buttons above them
+
+            if (_bodyPanel == null || _bodyTable == null) return;
+
+            int needed = _inputCardHeight + listFloor
+                       + (_tilesInRail ? 0 : _summaryRowHeight) + _chargesCardHeight;
+            int shown  = _bodyPanel.ClientSize.Height - _bodyPanel.Padding.Vertical;
+
+            _bodyTable.MinimumSize  = new Size(0, needed);
+            var scroll = needed > shown ? new Size(0, needed) : Size.Empty;
+            if (_bodyPanel.AutoScrollMinSize != scroll) _bodyPanel.AutoScrollMinSize = scroll;
         }
 
         // ── Dashboard Live Search ─────────────────────────────────────────────
@@ -1795,6 +1836,7 @@ namespace GreenWoodWorkAging
 
             // The rail's column belongs to the grid card and the band's row to the table above
             // it; ask both to recompute, or the freed space stays where the old layout put it.
+            KeepListVisible();
             _tilesRail.Parent?.PerformLayout();
             _tilesBand.Parent?.PerformLayout();
         }
@@ -2035,10 +2077,10 @@ namespace GreenWoodWorkAging
         private void RefreshAmounts()
         {
             var c = ReadCharges();
-            int eighths = _calc.CalculateGrandTotal(_measurements).GrandTotalEighths;
-            lblTapeAmount.Text  = Money(c.TapeAmount(eighths));
+            int sixteenths = _calc.CalculateGrandTotal(_measurements).GrandTotalSixteenths;
+            lblTapeAmount.Text  = Money(c.TapeAmount(sixteenths));
             lblSheetAmount.Text = Money(c.SheetAmount);
-            lblTotalAmount.Text = Money(c.TotalAmount(eighths));
+            lblTotalAmount.Text = Money(c.TotalAmount(sixteenths));
         }
 
         /// <summary>Loads a bill's saved charges into the fields without triggering another save.</summary>
@@ -2305,16 +2347,16 @@ namespace GreenWoodWorkAging
         {
             ClearError();
 
-            // Parse Height (format: "79.7" = 79 inches + 7 sooter)
-            if (!ParseMeasurement(txtHeight.Text, "Height", out int hi, out int hs)) return;
+            // Parse Height (format: "79.7" = 79 inches + 7 sooter, "79.19" = 79 inches + 1½)
+            if (!ParseMeasurement(txtHeight.Text, "Height", out int hi, out int hs, out int hh)) return;
 
             // Parse Width (format: "48.3" = 48 inches + 3 sooter)
-            if (!ParseMeasurement(txtWidth.Text, "Width", out int wi, out int ws)) return;
+            if (!ParseMeasurement(txtWidth.Text, "Width", out int wi, out int ws, out int wh)) return;
 
             int qty = (int)nudQuantity.Value;
             var side = CurrentSide();
 
-            if (hi == 0 && hs == 0 && wi == 0 && ws == 0)
+            if (hi == 0 && hs == 0 && hh == 0 && wi == 0 && ws == 0 && wh == 0)
             {
                 ShowError("At least one dimension (Height or Width) must be greater than zero.");
                 return;
@@ -2334,8 +2376,8 @@ namespace GreenWoodWorkAging
                 if (_editingIndex.HasValue)
                 {
                     var m = _measurements[_editingIndex.Value];
-                    m.HeightInches = hi; m.HeightSooter = hs;
-                    m.WidthInches  = wi; m.WidthSooter  = ws;
+                    m.HeightInches = hi; m.HeightSooter = hs; m.HeightHalf = hh;
+                    m.WidthInches  = wi; m.WidthSooter  = ws; m.WidthHalf  = wh;
                     m.Quantity     = qty;
                     m.Side         = side;
                     m.SheetCode    = CurrentSheetCode();
@@ -2350,8 +2392,8 @@ namespace GreenWoodWorkAging
                     {
                         BillId       = _currentBillId,
                         SerialNumber = _nextSerial++,
-                        HeightInches = hi, HeightSooter = hs,
-                        WidthInches  = wi, WidthSooter  = ws,
+                        HeightInches = hi, HeightSooter = hs, HeightHalf = hh,
+                        WidthInches  = wi, WidthSooter  = ws, WidthHalf  = wh,
                         Quantity     = qty,
                         Side         = side,
                         SheetCode    = CurrentSheetCode()
@@ -2445,8 +2487,8 @@ namespace GreenWoodWorkAging
                     {
                         BillId       = _currentBillId,
                         SerialNumber = _nextSerial++,
-                        HeightInches = s.HeightInches, HeightSooter = s.HeightSooter,
-                        WidthInches  = s.WidthInches,  WidthSooter  = s.WidthSooter,
+                        HeightInches = s.HeightInches, HeightSooter = s.HeightSooter, HeightHalf = s.HeightHalf,
+                        WidthInches  = s.WidthInches,  WidthSooter  = s.WidthSooter,  WidthHalf  = s.WidthHalf,
                         Quantity     = s.Quantity,
                         Side         = MeasurementSide.Both,
                         SheetCode    = importSheet
@@ -2470,44 +2512,30 @@ namespace GreenWoodWorkAging
         }
 
         /// <summary>
-        /// Parses combined "inches.sooter" format (e.g., "80.1" → 80 inches + 1 sooter).
-        /// Sooter must be 0-7. Empty input returns 0,0.
+        /// Parses combined "inches.sooter" format: "80.1" is 80 inches + 1 sooter and "8.19"
+        /// is 8 inches + 1½ sooter (a sady). Eight sooter carry into the inch, so the largest
+        /// fraction a size can hold is 7½. Empty input returns 0,0,0.
         /// </summary>
-        private bool ParseMeasurement(string input, string fieldName, out int inches, out int sooter)
+        private bool ParseMeasurement(string input, string fieldName,
+                                      out int inches, out int sooter, out int half)
         {
-            inches = 0;
-            sooter = 0;
+            inches = sooter = half = 0;
 
             string txt = input.Trim();
             if (string.IsNullOrEmpty(txt)) return true; // Empty is valid (0,0)
 
-            if (!txt.Contains('.'))
+            if (!MeasurementInputValidator.TryReadSixteenths(txt, out int sixteenths))
             {
-                // Just inches, no sooter
-                if (!int.TryParse(txt, out inches) || inches < 0)
-                {
-                    ShowError($"{fieldName}: Invalid number. Enter like 79 or 79.7 (79 inch 7 sooter)");
-                    return false;
-                }
-                return true;
-            }
-
-            string[] parts = txt.Split('.');
-            if (parts.Length != 2)
-            {
-                ShowError($"{fieldName}: Invalid format. Enter like 79 or 79.7 (79 inch 7 sooter)");
+                ShowError($"{fieldName}: Invalid format. Enter like 79 or 79.7 (79 inch 7 sooter), " +
+                          "or 8.19 for 8 inch 1½ sooter");
                 return false;
             }
 
-            if (!int.TryParse(parts[0], out inches) || inches < 0)
-            {
-                ShowError($"{fieldName}: Invalid inches. Enter like 79 or 79.7 (79 inch 7 sooter)");
-                return false;
-            }
+            (inches, sooter, half) = Sooter.Split(sixteenths);
 
-            if (!int.TryParse(parts[1], out sooter) || sooter < 0 || sooter > 7)
+            if (inches > MeasurementInputValidator.MaxInches)
             {
-                ShowError($"{fieldName}: Sooter must be 0-7 (1 inch = 8 sooter). Example: 79.7 = 79 inch 7 sooter");
+                ShowError($"{fieldName}: inches must be between 0 and {MeasurementInputValidator.MaxInches}.");
                 return false;
             }
 
@@ -2570,11 +2598,15 @@ namespace GreenWoodWorkAging
 
         private void OnGridCellClicked(object? sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0 || e.RowIndex >= _measurements.Count) return;
+            // A separator band is not a measurement, so it has no row to edit or delete.
+            if (e.RowIndex < 0 || e.RowIndex >= _gridRowToMeasurement.Count) return;
+            int row = _gridRowToMeasurement[e.RowIndex];
+            if (row < 0 || row >= _measurements.Count) return;
+
             if (dgv.Columns[e.ColumnIndex].Name == "colEdit")
-                LoadForEdit(e.RowIndex);
+                LoadForEdit(row);
             else if (dgv.Columns[e.ColumnIndex].Name == "colDel")
-                DeleteRow(e.RowIndex);
+                DeleteRow(row);
         }
 
         // ════════════════════════════════════════════════════════════════════
@@ -2584,8 +2616,8 @@ namespace GreenWoodWorkAging
         private void LoadForEdit(int idx)
         {
             var m = _measurements[idx];
-            txtHeight.Text = FormatMeasurement(m.HeightInches, m.HeightSooter);
-            txtWidth.Text  = FormatMeasurement(m.WidthInches, m.WidthSooter);
+            txtHeight.Text = FormatMeasurement(m.HeightInches, m.HeightSooter, m.HeightHalf);
+            txtWidth.Text  = FormatMeasurement(m.WidthInches,  m.WidthSooter,  m.WidthHalf);
             nudQuantity.Value     = m.Quantity;
             SelectSide(m.Side);
             txtSheetCode.Text = m.SheetCode;
@@ -2596,12 +2628,16 @@ namespace GreenWoodWorkAging
             txtHeight.Focus();
         }
 
-        /// <summary>Formats inches + sooter as "79.7".</summary>
-        private string FormatMeasurement(int inches, int sooter)
+        /// <summary>
+        /// Formats a size the way it is typed back into the box: "79.7", and "8.19" when it
+        /// carries a sady. An empty row reads as nothing, exactly as it was left.
+        /// </summary>
+        private string FormatMeasurement(int inches, int sooter, int half = 0)
         {
-            if (inches == 0 && sooter == 0) return "";
-            if (sooter == 0) return inches.ToString();
-            return $"{inches}.{sooter}";
+            if (inches == 0 && sooter == 0 && half == 0) return "";
+            if (half == 0)
+                return sooter == 0 ? inches.ToString() : $"{inches}.{sooter}";
+            return _fmt.FormatCompact(inches, sooter, half);
         }
 
         private void DeleteRow(int idx)
@@ -2715,8 +2751,9 @@ namespace GreenWoodWorkAging
         }
 
         /// <summary>
-        /// Turns the sizes on the bill into a cutting plan on standard 8 ft × 4 ft sheets
-        /// and shows, sheet by sheet, where each piece comes off.
+        /// Asks which sheets are on the floor, then turns the sizes on the bill into a cutting
+        /// plan cut out of exactly those sheets and shows, sheet by sheet, where each piece comes
+        /// off. Cancelling the stock question leaves the bill untouched.
         /// </summary>
         private void OpenSheetOptimizer()
         {
@@ -2727,9 +2764,23 @@ namespace GreenWoodWorkAging
                 return;
             }
 
+            // The bill's own sheet names are the sheets the shop is asked about, already typed
+            // in at the standard 8 ft × 4 ft — so the usual answer is only a count.
+            var codes = _measurements
+                            .Select(m => (m.SheetCode ?? "").Trim())
+                            .Where(c => c.Length > 0)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+            using var ask = new SheetStockPickForm(codes);
+            if (ask.ShowDialog(this) != DialogResult.OK) return;
+
             // One plan per sheet code: a size typed under "KMI 123" is never placed on a sheet
             // of another material. A bill without codes is one group and packs as it always did.
-            var plan = new SheetCuttingOptimizer().OptimizeBySheetCode(_measurements);
+            var opt = new SheetCuttingOptimizer();
+            var plan = ask.Stock.Count > 0 ? opt.OptimizeBySheetCode(_measurements, ask.Stock)
+                                           : opt.OptimizeBySheetCode(_measurements);
+
             using var form = new SheetOptimizerForm(plan, txtCustName.Text.Trim());
             form.ShowDialog(this);
         }
@@ -2786,8 +2837,8 @@ namespace GreenWoodWorkAging
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("Length,Width,Qty");
                 foreach (var m in _measurements)
-                    sb.AppendLine($"{_fmt.FormatCompact(m.HeightInches, m.HeightSooter)}," +
-                                  $"{_fmt.FormatCompact(m.WidthInches, m.WidthSooter)},{m.Quantity}");
+                    sb.AppendLine($"{_fmt.FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf)}," +
+                                  $"{_fmt.FormatCompact(m.WidthInches,  m.WidthSooter,  m.WidthHalf)},{m.Quantity}");
 
                 // The BOM is what tells Excel the file is UTF-8 rather than guessing at a code page.
                 File.WriteAllText(dlg.FileName, sb.ToString(), new System.Text.UTF8Encoding(true));
@@ -2863,9 +2914,9 @@ namespace GreenWoodWorkAging
 
             foreach (var m in rows)
             {
-                string h = _fmt.FormatCompact(m.HeightInches, m.HeightSooter);
-                string w = _fmt.FormatCompact(m.WidthInches,  m.WidthSooter);
-                string r = _fmt.FormatCompactFromEighths(m.RowTotalEighths);
+                string h = _fmt.FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf);
+                string w = _fmt.FormatCompact(m.WidthInches,  m.WidthSooter,  m.WidthHalf);
+                string r = _fmt.FormatCompactFromSixteenths(m.RowTotalSixteenths);
                 sb.AppendLine($"  {m.SerialNumber,-4}  {h,-10}  {w,-10}  {m.Quantity,-5}  {SideLabel(m.Side),-10}  {r,-12}");
             }
 
@@ -2873,19 +2924,19 @@ namespace GreenWoodWorkAging
             var t = _calc.CalculateGrandTotal(rows);
             sb.AppendLine($"  Total Rows   : {t.TotalRows}");
             sb.AppendLine($"  Total Pieces : {t.TotalPieces}");
-            sb.AppendLine($"  Grand Total  : {_fmt.FormatCompactFromEighths(t.GrandTotalEighths)} in");
+            sb.AppendLine($"  Grand Total  : {_fmt.FormatCompactFromSixteenths(t.GrandTotalSixteenths)} in");
             sb.AppendLine($"               : {_fmt.FormatGrandTotalFeetDot(t)}");
 
             if (!charges.IsEmpty)
             {
-                int    eighths = t.GrandTotalEighths;
-                decimal feet   = BillCharges.Feet(eighths);
+                int    length   = t.GrandTotalSixteenths;
+                decimal feet    = BillCharges.Feet(length);
                 sb.AppendLine(line);
-                sb.AppendLine(ChargeLine($"Tape  {feet:0.00} ft × Rs {charges.RatePerFoot:0.##}/ft", charges.TapeAmount(eighths)));
+                sb.AppendLine(ChargeLine($"Tape  {feet:0.00} ft × Rs {charges.RatePerFoot:0.##}/ft", charges.TapeAmount(length)));
                 sb.AppendLine(ChargeLine("Gari carriage", charges.CarriageFare));
                 sb.AppendLine(ChargeLine($"Sheet cuts  {charges.SheetCuts} × Rs {charges.RatePerSheet:0.##}", charges.SheetAmount));
                 sb.AppendLine(dblLine);
-                sb.AppendLine(ChargeLine("TOTAL AMOUNT", charges.TotalAmount(eighths)));
+                sb.AppendLine(ChargeLine("TOTAL AMOUNT", charges.TotalAmount(length)));
             }
 
             sb.AppendLine(dblLine);
@@ -2904,20 +2955,84 @@ namespace GreenWoodWorkAging
         private void RefreshGrid()
         {
             dgv.Rows.Clear();
-            foreach (var m in _measurements)
+            _gridRowToMeasurement.Clear();
+
+            string previousCode = null!;
+            bool first = true;
+
+            for (int index = 0; index < _measurements.Count; index++)
             {
-                // Compact dot notation: 80 → "80", 80 in + 4 sooter → "80.4"
-                string hVal = _fmt.FormatCompact(m.HeightInches, m.HeightSooter);
-                string wVal = _fmt.FormatCompact(m.WidthInches,  m.WidthSooter);
-                string oVal = _fmt.FormatCompactFromEighths(m.OnePieceEighths);
-                string rVal = _fmt.FormatCompactFromEighths(m.RowTotalEighths);
-                dgv.Rows.Add(m.SerialNumber.ToString(), m.SheetCode, hVal, wVal, m.Quantity.ToString(),
+                var m = _measurements[index];
+                string code = m.SheetCode ?? "";
+                bool startsBlock = first || code != previousCode;
+
+                // A new sheet name starts a new block: one empty strip above it carrying the name,
+                // and the name on every line of the block so a size can be read on its own.
+                // A bill that never named a sheet has no blocks to separate, so it lists exactly
+                // as it always did.
+                if (!first && startsBlock) AddSheetSeparator(code);
+
+                // Compact dot notation: 80 → "80", 80 in + 2 sooter → "80.25", + 1½ → "80.19"
+                string hVal = _fmt.FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf);
+                string wVal = _fmt.FormatCompact(m.WidthInches,  m.WidthSooter,  m.WidthHalf);
+                string oVal = _fmt.FormatCompactFromSixteenths(m.OnePieceSixteenths);
+                string rVal = _fmt.FormatCompactFromSixteenths(m.RowTotalSixteenths);
+
+                dgv.Rows.Add(m.SerialNumber.ToString(), code,
+                             hVal, wVal, m.Quantity.ToString(),
                              SideLabel(m.Side), oVal, rVal, "✏  Edit", "✕  Delete");
+
+                _gridRowToMeasurement.Add(index);
+                previousCode = code;
+                first        = false;
             }
+
             // Clear the current cell and row selection so the rebuilt grid does not
             // leave row 1 painted with the selection colours.
             dgv.CurrentCell = null;
             dgv.ClearSelection();
+        }
+
+        /// <summary>
+        /// The band between two sheet blocks. It is not a row of data and cannot be selected into
+        /// anything useful, so it is remembered as -1 in the row map. Its one piece of content is
+        /// the name of the block that starts under it, at the left; the rest of the strip stays empty.
+        /// </summary>
+        private void AddSheetSeparator(string code)
+        {
+            int row = dgv.Rows.Add();
+            var band = dgv.Rows[row];
+            var style = band.DefaultCellStyle;
+            style.BackColor          = CBg;
+            style.SelectionBackColor = CBg;
+            style.ForeColor          = CBg;
+            band.Height   = 30;
+            band.ReadOnly  = true;
+
+            // The action columns print their own label on every row, so a band would otherwise
+            // carry two dead Edit/Delete buttons. They are switched off for this row only.
+            foreach (DataGridViewCell cell in band.Cells)
+            {
+                if (cell is DataGridViewButtonCell button)
+                {
+                    button.UseColumnTextForButtonValue = false;
+                    cell.Value = "";
+                }
+                cell.Style.BackColor          = CBg;
+                cell.Style.SelectionBackColor = CBg;
+            }
+
+            if (code.Length > 0)
+            {
+                var name = band.Cells["colSheet"];
+                name.Value = code;
+                name.Style.ForeColor            = CSub;
+                name.Style.SelectionForeColor   = CSub;
+                name.Style.Font                 = FGridHdr;
+                name.Style.Alignment            = DataGridViewContentAlignment.MiddleLeft;
+            }
+
+            _gridRowToMeasurement.Add(-1);
         }
 
         private void RefreshTotals()
@@ -2925,7 +3040,7 @@ namespace GreenWoodWorkAging
             var t = _calc.CalculateGrandTotal(_measurements);
             lblTotalRows.Text   = t.TotalRows.ToString("N0");
             lblTotalPieces.Text = t.TotalPieces.ToString("N0");
-            lblGrandTotal.Text  = _fmt.FormatCompactFromEighths(t.GrandTotalEighths) + " in";
+            lblGrandTotal.Text  = _fmt.FormatCompactFromSixteenths(t.GrandTotalSixteenths) + " in";
             lblGrandSub.Text    = _fmt.FormatGrandTotalDecimalSub(t);
             lblFeet.Text        = _fmt.FormatGrandTotalFeetDot(t);
             lblFeetSub.Text     = _fmt.FormatGrandTotalFeetDecimalSub(t);
@@ -2991,9 +3106,10 @@ namespace GreenWoodWorkAging
                 if (char.IsControl(c)) { e.KeyChar = c; return; }
                 if (!char.IsDigit(c) && c != '.') { e.Handled = true; return; }
 
-                // Validate the text the key would produce, so an invalid sooter can never
-                // appear no matter where the caret sits. After the dot only one digit is
-                // allowed and it must be 0–7, because 8 sooter make a whole inch.
+                // Validate the text the key would produce, so a size can never be typed in a
+                // form the reader would have to guess at. One digit after the dot is the sooter
+                // count; two are the decimal inch off a tape — ".19" is 1½ sooter — so both are
+                // allowed, and 8 or 9 are only ever the start of a two-digit code being typed.
                 string next = tb.Text
                     .Remove(tb.SelectionStart, tb.SelectionLength)
                     .Insert(tb.SelectionStart, c.ToString());
@@ -3001,8 +3117,8 @@ namespace GreenWoodWorkAging
                 bool ok = dot < 0
                     ? next.All(char.IsDigit)
                     : next.Remove(dot).All(char.IsDigit)
-                      && next.Length - dot <= 2
-                      && next.Substring(dot + 1).All(ch => ch >= '0' && ch <= '7');
+                      && next.Length - dot - 1 <= 2
+                      && next.Substring(dot + 1).All(char.IsDigit);
                 e.Handled = !ok;
                 e.KeyChar = c;
             };
