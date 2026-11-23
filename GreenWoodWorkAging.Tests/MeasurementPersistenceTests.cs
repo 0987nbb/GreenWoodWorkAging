@@ -65,10 +65,9 @@ namespace GreenWoodWorkAging.Tests
             Assert.Equal(80, m.HeightInches); Assert.Equal(4, m.HeightSooter); Assert.Equal(0, m.HeightHalf);
             Assert.Equal(17, m.WidthInches);  Assert.Equal(7, m.WidthSooter);  Assert.Equal(0, m.WidthHalf);
 
-            // The lengths are the ones billed before sady existed: 80 inch 4 sooter is 80.5 inch,
-            // and it now reads with the two digits the tape gives.
+            // 80 inch 4 sooter displays as 80.4 preserving user-entered size.
             Assert.Equal(80 * Sooter.PerInch + 8, m.HeightSixteenths);
-            Assert.Equal("80.50", new MeasurementDisplayFormatter()
+            Assert.Equal("80.4", new MeasurementDisplayFormatter()
                                     .FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf));
         }
 

@@ -178,5 +178,22 @@ namespace GreenWoodWorkAging
             Assert.True(File.Exists(Path.Combine(dir, "sheets0.png")));
             Assert.True(File.Exists(Path.Combine(dir, "uncoded0.png")));
         }
+
+        [Fact]
+        public void Bill_WithSecondSheet_GeneratesPdfWithRowGap()
+        {
+            var rows = new List<MeasurementEntry>
+            {
+                new() { SerialNumber = 1, HeightInches = 20, HeightSooter = 5, WidthInches = 5, WidthSooter = 5, Quantity = 1, SheetCode = "Sheet 1" },
+                new() { SerialNumber = 2, HeightInches = 5, HeightSooter = 1, HeightHalf = 1, WidthInches = 5, WidthSooter = 2, WidthHalf = 1, Quantity = 2, SheetCode = "Sheet 2" }
+            };
+
+            string path = Path.Combine(Path.GetTempPath(), "gwa-bill-multisheet-test.pdf");
+            BillPdfService.Generate(path, Sample(rows: rows));
+
+            var bytes = File.ReadAllBytes(path);
+            Assert.True(bytes.Length > 2000);
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+        }
     }
 }

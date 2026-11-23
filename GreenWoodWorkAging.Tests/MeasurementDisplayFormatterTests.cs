@@ -77,19 +77,20 @@ namespace GreenWoodWorkAging.Tests
             => Assert.Equal(expected, _formatter.FormatCompact(inches, sooter, half));
 
         /// <summary>
-        /// A plain sooter is typed as the decimal inch it is on the tape — 2 sooter is ".25", not
-        /// ".2" — so nothing on the bill loses a digit the shop read off its own tape.
+        /// A plain sooter without a sady preserves the exact value entered (e.g. 5.5 remains 5.5, 20.5 remains 20.5).
         /// </summary>
         [Theory]
-        [InlineData(8, 1, 0, "8.12")]
-        [InlineData(8, 2, 0, "8.25")]
-        [InlineData(8, 3, 0, "8.37")]
-        [InlineData(8, 4, 0, "8.50")]
-        [InlineData(8, 5, 0, "8.62")]
-        [InlineData(8, 6, 0, "8.75")]
-        [InlineData(8, 7, 0, "8.87")]
+        [InlineData(8, 1, 0, "8.1")]
+        [InlineData(8, 2, 0, "8.2")]
+        [InlineData(8, 3, 0, "8.3")]
+        [InlineData(8, 4, 0, "8.4")]
+        [InlineData(8, 5, 0, "8.5")]
+        [InlineData(8, 6, 0, "8.6")]
+        [InlineData(8, 7, 0, "8.7")]
         [InlineData(8, 0, 0, "8")]
-        public void WithoutASady_TheTypedTwoDigitCodeIsShown(int inches, int sooter, int half, string expected)
+        [InlineData(20, 5, 0, "20.5")]
+        [InlineData(5, 5, 0, "5.5")]
+        public void WithoutASady_TheExactUserEnteredSizeIsShown(int inches, int sooter, int half, string expected)
             => Assert.Equal(expected, _formatter.FormatCompact(inches, sooter, half));
 
         [Fact]

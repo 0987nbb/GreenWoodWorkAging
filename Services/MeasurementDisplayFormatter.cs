@@ -43,13 +43,16 @@ namespace GreenWoodWorkAging.Services
 
         /// <summary>
         /// Compact dot label that mirrors how values are typed.
-        /// 80 in + 0 sooter → "80"   ·   80 in + 2 sooter → "80.25"   ·   + 1½ → "80.19"
+        /// 80 in + 0 sooter → "80"   ·   80 in + 2 sooter → "80.2"   ·   + 1½ → "80.19"
         /// </summary>
         public string FormatCompact(int inches, int sooter, int half = 0)
         {
+            if (half == 0)
+                return sooter == 0 ? inches.ToString(CultureInfo.InvariantCulture)
+                                   : $"{inches}.{sooter}";
+
             int units = sooter * Sooter.PerSooter + half;
-            return units == 0 ? inches.ToString(CultureInfo.InvariantCulture)
-                              : $"{inches}.{TapeCode(units)}";
+            return $"{inches}.{TapeCode(units)}";
         }
 
         /// <summary>Converts sixteenths then returns the compact dot label.</summary>
@@ -69,13 +72,16 @@ namespace GreenWoodWorkAging.Services
         // ── Dot format (input / grid primary display) ─────────────────────────
 
         /// <summary>
-        /// Formats in dot notation.  79 in + 7 sooter → "79.87""
-        /// If there is no fraction the decimal is omitted:  80 in → "80""
+        /// Formats in dot notation.  79 in + 7 sooter → "79.7\""
+        /// If there is no fraction the decimal is omitted:  80 in → "80\""
         /// </summary>
         public string FormatDot(int inches, int sooter, int half = 0)
         {
+            if (half == 0)
+                return sooter == 0 ? $"{inches}\"" : $"{inches}.{sooter}\"";
+
             int units = sooter * Sooter.PerSooter + half;
-            return units == 0 ? $"{inches}\"" : $"{inches}.{TapeCode(units)}\"";
+            return $"{inches}.{TapeCode(units)}\"";
         }
 
         /// <summary>Converts sixteenths → whole + sooter + sady, then formats in dot notation.</summary>

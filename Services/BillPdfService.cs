@@ -220,11 +220,30 @@ namespace GreenWoodWorkAging.Services
             });
 
             int i = 0;
+            string previousCode = null!;
+            bool first = true;
+
             foreach (var m in data.Rows)
             {
+                string code = m.SheetCode ?? "";
+                bool startsBlock = first || code != previousCode;
+
+                if (!first && startsBlock)
+                {
+                    var gapBg = PdfColor.FromHex("#F2F5F9");
+                    GapCell(gapBg, "");
+                    if (showSheet) GapCell(gapBg, code);
+                    GapCell(gapBg, "");
+                    GapCell(gapBg, "");
+                    GapCell(gapBg, "");
+                    GapCell(gapBg, "");
+                    GapCell(gapBg, "");
+                    GapCell(gapBg, "");
+                }
+
                 var shade = i++ % 2 == 0 ? Paper : RowAlt;
                 RowCell(shade, m.SerialNumber.ToString());
-                if (showSheet) RowCell(shade, m.SheetCode);
+                if (showSheet) RowCell(shade, m.SheetCode ?? "");
                 RowCell(shade, Fmt.FormatCompact(m.HeightInches, m.HeightSooter, m.HeightHalf));
                 RowCell(shade, Fmt.FormatCompact(m.WidthInches,  m.WidthSooter,  m.WidthHalf));
                 RowCell(shade, m.Quantity.ToString());
@@ -232,11 +251,19 @@ namespace GreenWoodWorkAging.Services
                 RowCell(shade, Fmt.FormatCompactFromSixteenths(m.RowTotalSixteenths));
                 RowCell(shade, $"{BillCharges.FeetFromSixteenths(m.RowTotalSixteenths):0.00}");
 
-                void RowCell(PdfColor back, string text) =>
-                    table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
-                         .PaddingVertical(7).PaddingHorizontal(10)
-                         .Text(text).FontSize(9).FontColor(Ink);
+                previousCode = code;
+                first        = false;
             }
+
+            void RowCell(PdfColor back, string text) =>
+                table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
+                     .PaddingVertical(7).PaddingHorizontal(10)
+                     .Text(text).FontSize(9).FontColor(Ink);
+
+            void GapCell(PdfColor back, string text) =>
+                table.Cell().Background(back).BorderBottom(0.6f).BorderColor(Line)
+                     .PaddingVertical(6).PaddingHorizontal(10)
+                     .Text(text).FontSize(8.5f).Bold().FontColor(Subtle);
 
             table.Cell().ColumnSpan(columns).Background(BrandDark).PaddingVertical(9).PaddingHorizontal(10)
                  .Text(t => t.Span($"GRAND TOTAL     {grandIn} in          {grandFt}")
