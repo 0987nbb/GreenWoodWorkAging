@@ -46,6 +46,7 @@
     <Compile Include="..\Services\BillPdfService.cs" Link="Services\BillPdfService.cs" />
     <Compile Include="..\Services\ManualInvoicePdfService.cs" Link="Services\ManualInvoicePdfService.cs" />
     <Compile Include="..\Services\SheetCuttingOptimizer.cs" Link="Services\SheetCuttingOptimizer.cs" />
+    <Compile Include="..\Services\SheetValidationService.cs" Link="Services\SheetValidationService.cs" />
     <Compile Include="..\Services\SheetDiagramRenderer.cs" Link="Services\SheetDiagramRenderer.cs" />
     <Compile Include="..\Services\SheetPlanPdfService.cs" Link="Services\SheetPlanPdfService.cs" />
     <!-- Only the two review windows, so their layout can be rendered and looked at. -->

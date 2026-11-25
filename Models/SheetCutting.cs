@@ -7,6 +7,9 @@ namespace GreenWoodWorkAging.Models
     /// </summary>
     public class CutPlacement
     {
+        /// <summary>Unique identity for this placed piece instance, so individual pieces can be tracked during drag-and-drop.</summary>
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
         /// <summary>Grid row the piece came from, so the same size always looks the same.</summary>
         public int SerialNumber { get; set; }
 
@@ -61,6 +64,10 @@ namespace GreenWoodWorkAging.Models
 
         public int SheetWidthSixteenths { get; set; }
         public int SheetHeightSixteenths { get; set; }
+
+        /// <summary>Blade thickness (kerf / cutting loss) applied to cuts on this sheet, in sixteenths of an inch.</summary>
+        public int BladeThicknessSixteenths { get; set; } = 3;
+        public double BladeThicknessSooter => BladeThicknessSixteenths / (double)Sooter.PerSooter;
 
         public List<CutPlacement> Placements { get; } = new();
         public List<ScrapRect> Scrap { get; } = new();
@@ -125,6 +132,12 @@ namespace GreenWoodWorkAging.Models
     {
         public int SheetWidthSixteenths { get; set; }
         public int SheetHeightSixteenths { get; set; }
+
+        /// <summary>Blade thickness (cutting loss / kerf) used for this plan, in sixteenths of an inch.</summary>
+        public int BladeThicknessSixteenths { get; set; } = 3;
+
+        /// <summary>Blade thickness in Sooter (1 Sooter = 2 sixteenths). Default is 1.5 Sooter.</summary>
+        public double BladeThicknessSooter { get; set; } = 1.5;
 
         public List<SheetLayout> Sheets { get; } = new();
         public List<UnplacedPiece> Unplaced { get; } = new();

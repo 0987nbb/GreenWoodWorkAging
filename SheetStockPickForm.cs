@@ -4,10 +4,10 @@ using GreenWoodWorkAging.Services;
 namespace GreenWoodWorkAging
 {
     /// <summary>
-    /// The question asked before a cutting plan is made: what sheets are actually on the floor.
-    /// The shop writes the material, its width and length and how many it has; the optimizer then
-    /// cuts the bill out of exactly those sheets. Leaving the count blank is allowed — that sheet
-    /// is simply treated as plenty, which is how every plan was cut before this window existed.
+    /// The question asked before a cutting plan is made: what sheets are actually on the floor,
+    /// and what blade thickness (cutting loss / kerf) to apply. The shop writes the material,
+    /// its width and length, how many it has, and optionally the blade thickness in Suter.
+    /// Leaving the count blank is allowed — that sheet is simply treated as plenty.
     /// </summary>
     public sealed class SheetStockPickForm : Form
     {
@@ -20,6 +20,7 @@ namespace GreenWoodWorkAging
         private static readonly Color CBlue    = Color.FromArgb(37, 99, 180);
         private static readonly Color CRed     = Color.FromArgb(203, 40, 40);
         private static readonly Color CInputBg = Color.FromArgb(250, 252, 254);
+        private static readonly Color CAmber   = Color.FromArgb(180, 100, 10);
 
         private static readonly Font FTitle  = new("Segoe UI", 12.5f, FontStyle.Bold);
         private static readonly Font FLine   = new("Segoe UI", 9.5f);
@@ -29,16 +30,25 @@ namespace GreenWoodWorkAging
 
         private readonly DataGridView _grid = new();
 
+        // Blade thickness input — default 1.5 Suter = 3 sixteenths
+        private readonly TextBox _bladeBox = new();
+        private const double DefaultBladeSooter = 1.5;
+
         /// <summary>What the shop wrote, once it pressed Optimize. Empty means "cut as before".</summary>
         public List<SheetCuttingOptimizer.StockSheet> Stock { get; } = new();
+
+        /// <summary>
+        /// Blade thickness in sixteenths of an inch chosen by the user. Zero means kerf is ignored.
+        /// </summary>
+        public int BladeThicknessSixteenths { get; private set; } = (int)Math.Round(DefaultBladeSooter * Sooter.PerSooter);
 
         public SheetStockPickForm(IEnumerable<string> sheetCodes)
         {
             Text            = "Sheets in stock";
             BackColor       = CBg;
             StartPosition   = FormStartPosition.CenterParent;
-            ClientSize      = new Size(760, 460);
-            MinimumSize     = new Size(620, 360);
+            ClientSize      = new Size(760, 500);
+            MinimumSize     = new Size(620, 400);
             Font            = new Font("Segoe UI", 9f);
             MinimizeBox     = false;
             AppIcon.Apply(this);
@@ -47,7 +57,7 @@ namespace GreenWoodWorkAging
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 3,
+                RowCount    = 4,
                 BackColor   = CBg,
                 Padding     = new Padding(16, 12, 16, 12)
             };
@@ -55,10 +65,12 @@ namespace GreenWoodWorkAging
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             root.Controls.Add(BuildHeading(),   0, 0);
             root.Controls.Add(BuildGrid(),      0, 1);
-            root.Controls.Add(BuildButtons(),   0, 2);
+            root.Controls.Add(BuildBladeRow(),  0, 2);
+            root.Controls.Add(BuildButtons(),   0, 3);
 
             Controls.Add(root);
 
@@ -150,6 +162,61 @@ namespace GreenWoodWorkAging
             };
         }
 
+        private Control BuildBladeRow()
+        {
+            var card = new Panel
+            {
+                Dock      = DockStyle.Fill,
+                BackColor = CCard,
+                Padding   = new Padding(14, 10, 14, 10),
+                Height    = 50
+            };
+            card.Paint += (_, e) => PaintBorder(e.Graphics, card);
+
+            var flow = new FlowLayoutPanel
+            {
+                Dock          = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents  = false,
+                BackColor     = Color.Transparent,
+                Margin        = Padding.Empty,
+                Padding       = Padding.Empty
+            };
+
+            var label = new Label
+            {
+                Text      = "✂  Blade thickness (Suter):",
+                Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = CText,
+                AutoSize  = true,
+                Margin    = new Padding(0, 5, 8, 0)
+            };
+
+            _bladeBox.Text        = DefaultBladeSooter.ToString("0.##");
+            _bladeBox.Width       = 64;
+            _bladeBox.Font        = FLine;
+            _bladeBox.BackColor   = CInputBg;
+            _bladeBox.BorderStyle = BorderStyle.FixedSingle;
+            _bladeBox.TextAlign   = HorizontalAlignment.Center;
+            _bladeBox.Margin      = new Padding(0, 2, 10, 0);
+
+            var unit = new Label
+            {
+                Text      = $"(Default: {DefaultBladeSooter:0.##} Suter = 3/16\" cutting loss / kerf)",
+                Font      = FSub,
+                ForeColor = CSub,
+                AutoSize  = true,
+                Margin    = new Padding(0, 5, 0, 0)
+            };
+
+            flow.Controls.Add(label);
+            flow.Controls.Add(_bladeBox);
+            flow.Controls.Add(unit);
+
+            card.Controls.Add(flow);
+            return card;
+        }
+
         private Control BuildButtons()
         {
             var bar = new TableLayoutPanel
@@ -166,11 +233,11 @@ namespace GreenWoodWorkAging
 
             var note = new Label
             {
-                Text   = "",
-                Font   = FSub,
+                Text      = "",
+                Font      = FSub,
                 ForeColor = CRed,
-                AutoSize = true,
-                Margin = new Padding(4, 10, 0, 0)
+                AutoSize  = true,
+                Margin    = new Padding(4, 10, 0, 0)
             };
 
             var optimize = BuildButton("⚙  Optimize", CGreen);
@@ -221,6 +288,22 @@ namespace GreenWoodWorkAging
         private void TryAccept(Label note)
         {
             _grid.EndEdit();
+
+            // ── Blade thickness ──────────────────────────────────────────────
+            string bladeText = _bladeBox.Text.Trim().Replace(',', '.');
+            if (!double.TryParse(bladeText, System.Globalization.NumberStyles.Any,
+                                 System.Globalization.CultureInfo.InvariantCulture, out double bladeSooter)
+                || bladeSooter < 0 || bladeSooter > 10)
+            {
+                note.Text      = "Blade thickness must be a number between 0 and 10 Suter.";
+                note.ForeColor = CRed;
+                return;
+            }
+
+            // Convert Suter → sixteenths (1 Suter = PerSooter sixteenths = 2 sixteenths)
+            int bladeSixteenths = (int)Math.Round(bladeSooter * Sooter.PerSooter);
+
+            // ── Sheet stock rows ─────────────────────────────────────────────
             var read = new List<SheetCuttingOptimizer.StockSheet>();
             var bad  = new List<string>();
 
@@ -247,11 +330,12 @@ namespace GreenWoodWorkAging
 
             if (bad.Count > 0)
             {
-                note.Text   = $"Width and length are needed on {string.Join(", ", bad)}.";
+                note.Text      = $"Width and length are needed on {string.Join(", ", bad)}.";
                 note.ForeColor = CRed;
                 return;
             }
 
+            BladeThicknessSixteenths = bladeSixteenths;
             Stock.Clear();
             Stock.AddRange(read);
             DialogResult = DialogResult.OK;

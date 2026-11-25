@@ -52,6 +52,9 @@ namespace GreenWoodWorkAging.Services
         /// <summary>How long one bill may be searched before the greedy answer is kept.</summary>
         private const int SearchBudgetMs = 1500;
 
+        /// <summary>Node limit for the exact one-sheet feasibility pass.</summary>
+        private const int SingleSheetNodeLimit = 200_000;
+
         /// <summary>Piece orders worth searching; the rest only feed the greedy runs.</summary>
         private const int SearchedOrders = 2;
 
@@ -73,15 +76,20 @@ namespace GreenWoodWorkAging.Services
         private readonly int _sheetH;
         private readonly int _sheetW;
 
+        /// <summary>Blade thickness (cutting loss / kerf) in sixteenths of an inch.</summary>
+        public int BladeThicknessSixteenths { get; set; }
+
         /// <summary>Sheets this run may open. int.MaxValue when the shop did not say how many.</summary>
         private int _maxSheets;
 
         public SheetCuttingOptimizer(int sheetHeightInches = DefaultSheetHeightInches,
                                      int sheetWidthInches  = DefaultSheetWidthInches,
-                                     int sheetQuantity     = 0)
+                                     int sheetQuantity     = 0,
+                                     int bladeThicknessSixteenths = 0)
         {
             _sheetH = sheetHeightInches * SixteenthsPerInch;
             _sheetW = sheetWidthInches  * SixteenthsPerInch;
+            BladeThicknessSixteenths = bladeThicknessSixteenths;
 
             // A count of 0 or less is "not counted", so the packer never runs out of sheets.
             _maxSheets = sheetQuantity > 0 ? sheetQuantity : int.MaxValue;
@@ -92,9 +100,9 @@ namespace GreenWoodWorkAging.Services
         /// never counted that stock — and zero when it counted and they are all gone, which is
         /// not the same thing.
         /// </summary>
-        private static SheetCuttingOptimizer For(StockSheet stock, int? sheetsLeft)
+        private SheetCuttingOptimizer For(StockSheet stock, int? sheetsLeft)
         {
-            var packer = new SheetCuttingOptimizer(stock.HeightInches, stock.WidthInches);
+            var packer = new SheetCuttingOptimizer(stock.HeightInches, stock.WidthInches, bladeThicknessSixteenths: BladeThicknessSixteenths);
             packer._maxSheets = sheetsLeft ?? int.MaxValue;
             return packer;
         }
@@ -104,7 +112,10 @@ namespace GreenWoodWorkAging.Services
             var pieces = Expand(rows);
             var orders = Orders(pieces);
 
-            Plan? best = null;
+            // Before opening multiple sheets, search directly for a one-sheet layout. The
+            // normal beam search is excellent at reducing sheet count, but a beam can prune
+            // the only sequence that packs a difficult bill onto one sheet.
+            Plan? best = TryPackAllOnOneSheet(pieces);
             foreach (var order in orders)
             {
                 var plan = Compact(Build(order));
@@ -133,11 +144,14 @@ namespace GreenWoodWorkAging.Services
             var result = new OptimizationResult
             {
                 SheetWidthSixteenths  = _sheetW,
-                SheetHeightSixteenths = _sheetH
+                SheetHeightSixteenths = _sheetH,
+                BladeThicknessSixteenths = BladeThicknessSixteenths,
+                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter
             };
 
             foreach (var sheet in best.Sheets)
             {
+                sheet.Layout.BladeThicknessSixteenths = BladeThicknessSixteenths;
                 sheet.Layout.Scrap.AddRange(sheet.Scrap);
                 result.Sheets.Add(sheet.Layout);
             }
@@ -166,6 +180,73 @@ namespace GreenWoodWorkAging.Services
         }
 
         /// <summary>
+        /// Exhaustively searches the one-sheet placement space for modest bills. Every free
+        /// rectangle corner and both orientations are considered; the most constrained piece
+        /// is placed first. The node cap keeps unusually hard packing problems responsive, in
+        /// which case the regular multi-sheet optimizer continues with its best plan.
+        /// </summary>
+        private Plan? TryPackAllOnOneSheet(List<Piece> pieces)
+        {
+            if (_maxSheets < 1 || pieces.Count > 24) return null;
+
+            var unplaced = pieces.Where(p => !FitsOnASheet(p)).ToList();
+            var packable = pieces.Where(FitsOnASheet).ToList();
+            if (packable.Count == 0) return null;
+            var initial = new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths);
+            var remaining = Enumerable.Range(0, packable.Count).ToList();
+            var visited = new HashSet<string>();
+            int nodes = 0;
+
+            if (!PlaceRemaining(initial, remaining, packable, visited, ref nodes, out var packed))
+                return null;
+
+            return new Plan(new List<OpenSheet> { packed! }, unplaced);
+        }
+
+        private bool PlaceRemaining(OpenSheet sheet, List<int> remaining, List<Piece> pieces,
+                                    HashSet<string> visited, ref int nodes, out OpenSheet? packed)
+        {
+            if (remaining.Count == 0) { packed = sheet; return true; }
+            if (++nodes > SingleSheetNodeLimit) { packed = null; return false; }
+
+            string key = sheet.Signature + "|" + string.Join(",", remaining.OrderBy(i => i));
+            if (!visited.Add(key)) { packed = null; return false; }
+
+            // Minimum remaining values: trying the piece with the fewest legal placements
+            // first tends to expose impossible branches early and reduces order sensitivity.
+            int selected = -1;
+            List<Spot>? selectedSpots = null;
+            foreach (int index in remaining)
+            {
+                var spots = sheet.Corners(pieces[index])
+                    .GroupBy(s => (s.X, s.Y, s.W, s.H, s.Rotated))
+                    .Select(g => g.First())
+                    .ToList();
+                if (spots.Count == 0) { packed = null; return false; }
+
+                if (selectedSpots == null || spots.Count < selectedSpots.Count)
+                {
+                    selected = index;
+                    selectedSpots = spots;
+                    if (spots.Count == 1) break;
+                }
+            }
+
+            var nextRemaining = remaining.Where(i => i != selected).ToList();
+            foreach (var spot in selectedSpots!)
+            {
+                var next = OpenSheet.Rebuild(sheet, _sheetW, _sheetH);
+                next.Place(pieces[selected], spot);
+                if (PlaceRemaining(next, nextRemaining, pieces, visited, ref nodes, out packed))
+                    return true;
+                if (nodes > SingleSheetNodeLimit) { packed = null; return false; }
+            }
+
+            packed = null;
+            return false;
+        }
+
+        /// <summary>
         /// Pack the bill one sheet code at a time, so a piece of "KMI 123" never lands on a
         /// sheet of Super Glass. Sizes that were never given a code form one unnamed group,
         /// and a bill with a single group packs exactly like <see cref="Optimize"/>.
@@ -182,7 +263,9 @@ namespace GreenWoodWorkAging.Services
             var combined = new OptimizationResult
             {
                 SheetWidthSixteenths  = _sheetW,
-                SheetHeightSixteenths = _sheetH
+                SheetHeightSixteenths = _sheetH,
+                BladeThicknessSixteenths = BladeThicknessSixteenths,
+                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter
             };
 
             if (stock == null || stock.Count == 0)
@@ -302,7 +385,7 @@ namespace GreenWoodWorkAging.Services
                         continue;
                     }
 
-                    target = new OpenSheet(sheets.Count + 1, _sheetW, _sheetH);
+                    target = new OpenSheet(sheets.Count + 1, _sheetW, _sheetH, BladeThicknessSixteenths);
                     sheets.Add(target);
                     spot = target.FindSpot(piece);
                 }
@@ -370,7 +453,7 @@ namespace GreenWoodWorkAging.Services
                     // A branch that would have to open a sheet the shop does not have is not a
                     // plan, so it is dropped; if every branch dies, the greedy answer stands.
                     if (state.Sheets.Count < _maxSheets)
-                        next.Add(state.StartNewSheet(piece, _sheetW, _sheetH));
+                        next.Add(state.StartNewSheet(piece, _sheetW, _sheetH, BladeThicknessSixteenths));
                 }
 
                 if (next.Count == 0) return null;
@@ -484,6 +567,12 @@ namespace GreenWoodWorkAging.Services
         private Plan Compact(Plan plan)
         {
             while (plan.Sheets.Count > 1 && TryEmptyLastSheet(plan)) { }
+
+            // Final aggressive pass: when only 2 sheets remain, exhaust all permutations of the
+            // smaller sheet to guarantee we don't miss a one-sheet solution.
+            if (plan.Sheets.Count == 2)
+                TryCollapseToOneSheet(plan);
+
             return plan;
         }
 
@@ -492,15 +581,24 @@ namespace GreenWoodWorkAging.Services
             var keep   = plan.Sheets.Take(plan.Sheets.Count - 1).ToList();
             var moving = plan.Sheets[^1].Placed.Select(p => p.Piece).ToList();
 
-            // The same pieces re-housed in a different order give different answers, so a few
+            // The same pieces re-housed in a different order give different answers, so many
             // orders are tried before the sheet is given up on.
-            foreach (var order in new[]
+            var orders = new List<List<Piece>>
             {
                 moving.OrderByDescending(p => p.Area).ToList(),
-                moving.OrderBy       (p => p.Area).ToList(),
+                moving.OrderBy(p => p.Area).ToList(),
                 moving.OrderByDescending(p => p.Longest).ThenByDescending(p => p.Area).ToList(),
-                moving.OrderByDescending(p => p.Shortest).ThenByDescending(p => p.Area).ToList()
-            })
+                moving.OrderByDescending(p => p.Shortest).ThenByDescending(p => p.Area).ToList(),
+                moving.OrderByDescending(p => p.H).ToList(),
+                moving.OrderByDescending(p => p.W).ToList(),
+                moving.OrderBy(p => p.Longest).ToList(),
+                moving.OrderBy(p => p.Shortest).ToList(),
+                // Reversed versions of key orderings
+                moving.OrderBy(p => p.Longest).ThenBy(p => p.Area).ToList(),
+                moving.OrderBy(p => p.H).ThenBy(p => p.W).ToList(),
+            };
+
+            foreach (var order in orders)
             {
                 var trial = keep.Select(s => OpenSheet.Rebuild(s, _sheetW, _sheetH)).ToList();
                 if (HousingFits(trial, order))
@@ -512,6 +610,56 @@ namespace GreenWoodWorkAging.Services
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// When exactly 2 sheets remain after normal compaction, tries all piece orderings
+        /// of ALL pieces together to see if everything fits on one sheet.
+        /// Only runs when the total piece count is small enough that it is fast.
+        /// </summary>
+        private void TryCollapseToOneSheet(Plan plan)
+        {
+            var allPieces = plan.Sheets.SelectMany(s => s.Placed.Select(p => p.Piece)).ToList();
+            if (allPieces.Count > 20) return; // too many pieces — skip exhaustive search
+
+            // Build many orderings of all pieces and try packing them all onto one sheet
+            var orders = new List<List<Piece>>
+            {
+                allPieces.OrderByDescending(p => p.Area).ToList(),
+                allPieces.OrderByDescending(p => p.Longest).ThenByDescending(p => p.Area).ToList(),
+                allPieces.OrderByDescending(p => p.H).ThenByDescending(p => p.W).ToList(),
+                allPieces.OrderByDescending(p => p.W).ThenByDescending(p => p.H).ToList(),
+                allPieces.OrderByDescending(p => p.Shortest).ThenByDescending(p => p.Area).ToList(),
+                allPieces.OrderBy(p => p.Area).ToList(),
+                allPieces.OrderBy(p => p.Longest).ToList(),
+                allPieces.OrderBy(p => p.Shortest).ToList(),
+                allPieces.OrderByDescending(p => p.H).ToList(),
+                allPieces.OrderByDescending(p => p.W).ToList(),
+            };
+
+            // Also add a few random shuffles for small counts
+            if (allPieces.Count <= 12)
+            {
+                for (int seed = 1; seed <= 8; seed++)
+                {
+                    var rng = new Random(seed * 3571);
+                    orders.Add(allPieces.OrderBy(_ => rng.Next()).ToList());
+                }
+            }
+
+            foreach (var order in orders)
+            {
+                var singleSheet = new List<OpenSheet>
+                {
+                    new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths)
+                };
+                if (HousingFits(singleSheet, order))
+                {
+                    plan.Sheets.Clear();
+                    plan.Sheets.AddRange(singleSheet);
+                    return;
+                }
+            }
         }
 
         private static bool HousingFits(List<OpenSheet> sheets, List<Piece> pieces)
@@ -536,17 +684,28 @@ namespace GreenWoodWorkAging.Services
             return a.LastSheetUsed > b.LastSheetUsed;
         }
 
-        private bool FitsOnASheet(Piece p) =>
-            Math.Min(p.H, p.W) <= _sheetW && Math.Max(p.H, p.W) <= _sheetH;
+        private bool FitsOnASheet(Piece p)
+        {
+            // A piece fits on a sheet when its actual dimensions fit either vertically or horizontally.
+            int minDim = Math.Min(p.ActualH, p.ActualW);
+            int maxDim = Math.Max(p.ActualH, p.ActualW);
+            return minDim <= _sheetW && maxDim <= _sheetH;
+        }
 
-        private static List<Piece> Expand(IEnumerable<MeasurementEntry> rows)
+        /// <summary>
+        /// Expands each bill row into one Piece per unit of quantity.
+        /// Actual requested dimensions are preserved; kerf (cutting loss) is applied
+        /// dynamically during packing at cut lines rather than inflating boundaries.
+        /// </summary>
+        private List<Piece> Expand(IEnumerable<MeasurementEntry> rows)
         {
             var list = new List<Piece>();
             foreach (var row in rows)
             {
                 if (row.HeightSixteenths <= 0 || row.WidthSixteenths <= 0) continue;
                 for (int i = 0; i < row.Quantity; i++)
-                    list.Add(new Piece(row.SerialNumber, row.HeightSixteenths, row.WidthSixteenths));
+                    list.Add(new Piece(row.SerialNumber, row.HeightSixteenths, row.WidthSixteenths,
+                                       row.HeightSixteenths, row.WidthSixteenths));
             }
             return list;
         }
@@ -593,8 +752,16 @@ namespace GreenWoodWorkAging.Services
 
         // ── Types ────────────────────────────────────────────────────────────
 
-        private readonly record struct Piece(int Serial, int H, int W)
+        /// <summary>
+        /// A piece to pack. H and W are the kerf-inflated dimensions used by the packer.
+        /// ActualH and ActualW are the original requested sizes placed into CutPlacement.
+        /// When no kerf is configured ActualH == H and ActualW == W.
+        /// </summary>
+        private readonly record struct Piece(int Serial, int H, int W, int ActualH, int ActualW)
         {
+            /// <summary>Convenience ctor for zero-kerf backward-compatibility.</summary>
+            public Piece(int serial, int h, int w) : this(serial, h, w, h, w) { }
+
             public int Area     => H * W;
             public int Longest  => Math.Max(H, W);
             public int Shortest => Math.Min(H, W);
@@ -691,13 +858,15 @@ namespace GreenWoodWorkAging.Services
             /// <summary>Everything placed here, in the order it was placed, for a replay.</summary>
             public List<PlacedPiece> Placed { get; } = new();
 
-            public OpenSheet(int number, int widthSixteenths, int heightSixteenths)
+            public OpenSheet(int number, int widthSixteenths, int heightSixteenths,
+                             int bladeThicknessSixteenths = 0)
             {
                 Layout = new SheetLayout
                 {
-                    Number              = number,
-                    SheetWidthSixteenths   = widthSixteenths,
-                    SheetHeightSixteenths  = heightSixteenths
+                    Number                    = number,
+                    SheetWidthSixteenths      = widthSixteenths,
+                    SheetHeightSixteenths     = heightSixteenths,
+                    BladeThicknessSixteenths  = bladeThicknessSixteenths
                 };
                 _free.Add(new Rect(0, 0, widthSixteenths, heightSixteenths));
             }
@@ -705,7 +874,8 @@ namespace GreenWoodWorkAging.Services
             /// <summary>A fresh sheet with the same pieces put back exactly where they were.</summary>
             public static OpenSheet Rebuild(OpenSheet source, int widthSixteenths, int heightSixteenths)
             {
-                var copy = new OpenSheet(source.Layout.Number, widthSixteenths, heightSixteenths);
+                var copy = new OpenSheet(source.Layout.Number, widthSixteenths, heightSixteenths,
+                                         source.Layout.BladeThicknessSixteenths);
                 foreach (var placed in source.Placed)
                 {
                     // The replay follows the same splits and the same merges, so the block each
@@ -739,24 +909,67 @@ namespace GreenWoodWorkAging.Services
             /// Every position this piece could take on this sheet: each corner of each free
             /// block, in both orientations. Ranked by <see cref="Spot.BetterThan"/> elsewhere —
             /// the greedy packer wants only the cheapest, the search wants the next few too.
+            /// Blade thickness (kerf) is applied to interior cuts; factory edges at sheet
+            /// boundaries do not lose blade thickness.
             /// </summary>
             public IEnumerable<Spot> Corners(Piece piece)
             {
+                int kerf   = Layout.BladeThicknessSixteenths;
+                int sheetW = Layout.SheetWidthSixteenths;
+                int sheetH = Layout.SheetHeightSixteenths;
+
                 for (int i = 0; i < _free.Count; i++)
                 {
                     var free = _free[i];
 
-                    foreach (var (w, h, rotated) in new[]
+                    foreach (var (actualW, actualH, rotated) in new[]
                     {
-                        (piece.W, piece.H, false),
-                        (piece.H, piece.W, true)
+                        (piece.ActualW, piece.ActualH, false),
+                        (piece.ActualH, piece.ActualW, true)
                     })
                     {
-                        if (w > free.W || h > free.H) continue;
+                        if (actualW > free.W || actualH > free.H) continue;
 
-                        foreach (int x in new[] { free.X, free.Right - w })
-                            foreach (int y in new[] { free.Y, free.Bottom - h })
-                                yield return new Spot(i, free, x, y, w, h, rotated);
+                        int[] xCandidates = (free.W == actualW)
+                            ? new[] { free.X }
+                            : new[] { free.X, free.Right - actualW };
+
+                        int[] yCandidates = (free.H == actualH)
+                            ? new[] { free.Y }
+                            : new[] { free.Y, free.Bottom - actualH };
+
+                        foreach (int x in xCandidates)
+                        {
+                            // If this piece edge reaches the sheet boundary, it does not need kerf at that boundary
+                            int effW = (x + actualW >= sheetW || (free.Right == sheetW && x + actualW == free.Right))
+                                ? actualW
+                                : actualW + kerf;
+
+                            if (x + effW > free.Right)
+                            {
+                                if (x + actualW <= free.Right && (free.Right == sheetW || x + actualW == sheetW))
+                                    effW = actualW;
+                                else
+                                    continue;
+                            }
+
+                            foreach (int y in yCandidates)
+                            {
+                                int effH = (y + actualH >= sheetH || (free.Bottom == sheetH && y + actualH == free.Bottom))
+                                    ? actualH
+                                    : actualH + kerf;
+
+                                if (y + effH > free.Bottom)
+                                {
+                                    if (y + actualH <= free.Bottom && (free.Bottom == sheetH || y + actualH == sheetH))
+                                        effH = actualH;
+                                    else
+                                        continue;
+                                }
+
+                                yield return new Spot(i, free, x, y, effW, effH, rotated);
+                            }
+                        }
                     }
                 }
             }
@@ -787,14 +1000,19 @@ namespace GreenWoodWorkAging.Services
 
                 MergeFreeRects();
 
+                // Record the actual (non-kerf-inflated) piece size in the layout so the diagram
+                // and PDF show the size the customer ordered, not the packer's inflated slot.
+                int actualW = rotated ? piece.ActualH : piece.ActualW;
+                int actualH = rotated ? piece.ActualW : piece.ActualH;
+
                 Layout.Placements.Add(new CutPlacement
                 {
-                    SerialNumber  = piece.Serial,
-                    X             = x,
-                    Y             = y,
-                    WidthSixteenths  = w,
-                    HeightSixteenths = h,
-                    Rotated       = rotated
+                    SerialNumber     = piece.Serial,
+                    X                = x,
+                    Y                = y,
+                    WidthSixteenths  = actualW,
+                    HeightSixteenths = actualH,
+                    Rotated          = rotated
                 });
                 Placed.Add(new PlacedPiece(piece, free, freeIndex, x, y, w, h, rotated));
             }
@@ -881,9 +1099,11 @@ namespace GreenWoodWorkAging.Services
                 return new State(sheets, sheets.Sum(s => s.DeadArea));
             }
 
-            public State StartNewSheet(Piece piece, int widthSixteenths, int heightSixteenths)
+            public State StartNewSheet(Piece piece, int widthSixteenths, int heightSixteenths,
+                                       int bladeThicknessSixteenths = 0)
             {
-                var fresh = new OpenSheet(Sheets.Count + 1, widthSixteenths, heightSixteenths);
+                var fresh = new OpenSheet(Sheets.Count + 1, widthSixteenths, heightSixteenths,
+                                          bladeThicknessSixteenths);
                 fresh.Place(piece, fresh.FindSpot(piece)!);
 
                 var sheets = new List<OpenSheet>(Sheets) { fresh };
