@@ -78,6 +78,7 @@ namespace GreenWoodWorkAging.Services
 
         /// <summary>Blade thickness (cutting loss / kerf) in sixteenths of an inch.</summary>
         public int BladeThicknessSixteenths { get; set; }
+        public SheetCuttingDirection CuttingDirection { get; set; }
 
         /// <summary>Sheets this run may open. int.MaxValue when the shop did not say how many.</summary>
         private int _maxSheets;
@@ -85,11 +86,13 @@ namespace GreenWoodWorkAging.Services
         public SheetCuttingOptimizer(int sheetHeightInches = DefaultSheetHeightInches,
                                      int sheetWidthInches  = DefaultSheetWidthInches,
                                      int sheetQuantity     = 0,
-                                     int bladeThicknessSixteenths = 0)
+                                     int bladeThicknessSixteenths = 0,
+                                     SheetCuttingDirection cuttingDirection = SheetCuttingDirection.Any)
         {
             _sheetH = sheetHeightInches * SixteenthsPerInch;
             _sheetW = sheetWidthInches  * SixteenthsPerInch;
             BladeThicknessSixteenths = bladeThicknessSixteenths;
+            CuttingDirection = cuttingDirection;
 
             // A count of 0 or less is "not counted", so the packer never runs out of sheets.
             _maxSheets = sheetQuantity > 0 ? sheetQuantity : int.MaxValue;
@@ -102,7 +105,8 @@ namespace GreenWoodWorkAging.Services
         /// </summary>
         private SheetCuttingOptimizer For(StockSheet stock, int? sheetsLeft)
         {
-            var packer = new SheetCuttingOptimizer(stock.HeightInches, stock.WidthInches, bladeThicknessSixteenths: BladeThicknessSixteenths);
+            var packer = new SheetCuttingOptimizer(stock.HeightInches, stock.WidthInches,
+                bladeThicknessSixteenths: BladeThicknessSixteenths, cuttingDirection: CuttingDirection);
             packer._maxSheets = sheetsLeft ?? int.MaxValue;
             return packer;
         }
@@ -146,12 +150,14 @@ namespace GreenWoodWorkAging.Services
                 SheetWidthSixteenths  = _sheetW,
                 SheetHeightSixteenths = _sheetH,
                 BladeThicknessSixteenths = BladeThicknessSixteenths,
-                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter
+                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter,
+                CuttingDirection = CuttingDirection
             };
 
             foreach (var sheet in best.Sheets)
             {
                 sheet.Layout.BladeThicknessSixteenths = BladeThicknessSixteenths;
+                sheet.Layout.CuttingDirection = CuttingDirection;
                 sheet.Layout.Scrap.AddRange(sheet.Scrap);
                 result.Sheets.Add(sheet.Layout);
             }
@@ -192,7 +198,7 @@ namespace GreenWoodWorkAging.Services
             var unplaced = pieces.Where(p => !FitsOnASheet(p)).ToList();
             var packable = pieces.Where(FitsOnASheet).ToList();
             if (packable.Count == 0) return null;
-            var initial = new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths);
+            var initial = new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths, CuttingDirection);
             var remaining = Enumerable.Range(0, packable.Count).ToList();
             var visited = new HashSet<string>();
             int nodes = 0;
@@ -265,7 +271,8 @@ namespace GreenWoodWorkAging.Services
                 SheetWidthSixteenths  = _sheetW,
                 SheetHeightSixteenths = _sheetH,
                 BladeThicknessSixteenths = BladeThicknessSixteenths,
-                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter
+                BladeThicknessSooter = BladeThicknessSixteenths / (double)Sooter.PerSooter,
+                CuttingDirection = CuttingDirection
             };
 
             if (stock == null || stock.Count == 0)
@@ -316,6 +323,7 @@ namespace GreenWoodWorkAging.Services
                     sheet.Number    = number++;
                     sheet.Source    = group.Key;
                     sheet.StockName = sheetStock.Name;
+                    sheet.CuttingDirection = CuttingDirection;
                     combined.Sheets.Add(sheet);
                 }
 
@@ -385,7 +393,7 @@ namespace GreenWoodWorkAging.Services
                         continue;
                     }
 
-                    target = new OpenSheet(sheets.Count + 1, _sheetW, _sheetH, BladeThicknessSixteenths);
+                    target = new OpenSheet(sheets.Count + 1, _sheetW, _sheetH, BladeThicknessSixteenths, CuttingDirection);
                     sheets.Add(target);
                     spot = target.FindSpot(piece);
                 }
@@ -453,7 +461,7 @@ namespace GreenWoodWorkAging.Services
                     // A branch that would have to open a sheet the shop does not have is not a
                     // plan, so it is dropped; if every branch dies, the greedy answer stands.
                     if (state.Sheets.Count < _maxSheets)
-                        next.Add(state.StartNewSheet(piece, _sheetW, _sheetH, BladeThicknessSixteenths));
+                        next.Add(state.StartNewSheet(piece, _sheetW, _sheetH, BladeThicknessSixteenths, CuttingDirection));
                 }
 
                 if (next.Count == 0) return null;
@@ -488,7 +496,11 @@ namespace GreenWoodWorkAging.Services
             all.Sort((a, b) =>
             {
                 if (a.Item2.Score != b.Item2.Score)       return a.Item2.Score.CompareTo(b.Item2.Score);
-                if (a.Item2.Rotated != b.Item2.Rotated)   return a.Item2.Rotated ? 1 : -1;
+                if (a.Item2.Rotated != b.Item2.Rotated)
+                {
+                    bool preferRotated = a.Item1.Layout.CuttingDirection == SheetCuttingDirection.WidthWise;
+                    return a.Item2.Rotated == preferRotated ? -1 : 1;
+                }
                 return a.Item2.Leftover.CompareTo(b.Item2.Leftover);
             });
 
@@ -651,7 +663,7 @@ namespace GreenWoodWorkAging.Services
             {
                 var singleSheet = new List<OpenSheet>
                 {
-                    new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths)
+                    new OpenSheet(1, _sheetW, _sheetH, BladeThicknessSixteenths, CuttingDirection)
                 };
                 if (HousingFits(singleSheet, order))
                 {
@@ -686,10 +698,10 @@ namespace GreenWoodWorkAging.Services
 
         private bool FitsOnASheet(Piece p)
         {
-            // A piece fits on a sheet when its actual dimensions fit either vertically or horizontally.
-            int minDim = Math.Min(p.ActualH, p.ActualW);
-            int maxDim = Math.Max(p.ActualH, p.ActualW);
-            return minDim <= _sheetW && maxDim <= _sheetH;
+            // Direction determines which orientation is preferred. Always check the
+            // alternative too, so a part that fits after rotation is not marked oversized.
+            return (p.ActualW <= _sheetW && p.ActualH <= _sheetH) ||
+                   (p.ActualH <= _sheetW && p.ActualW <= _sheetH);
         }
 
         /// <summary>
@@ -705,7 +717,7 @@ namespace GreenWoodWorkAging.Services
                 if (row.HeightSixteenths <= 0 || row.WidthSixteenths <= 0) continue;
                 for (int i = 0; i < row.Quantity; i++)
                     list.Add(new Piece(row.SerialNumber, row.HeightSixteenths, row.WidthSixteenths,
-                                       row.HeightSixteenths, row.WidthSixteenths));
+                                       row.HeightSixteenths, row.WidthSixteenths, row.Side));
             }
             return list;
         }
@@ -757,10 +769,11 @@ namespace GreenWoodWorkAging.Services
         /// ActualH and ActualW are the original requested sizes placed into CutPlacement.
         /// When no kerf is configured ActualH == H and ActualW == W.
         /// </summary>
-        private readonly record struct Piece(int Serial, int H, int W, int ActualH, int ActualW)
+        private readonly record struct Piece(int Serial, int H, int W, int ActualH, int ActualW,
+                                             MeasurementSide TapeSelection)
         {
             /// <summary>Convenience ctor for zero-kerf backward-compatibility.</summary>
-            public Piece(int serial, int h, int w) : this(serial, h, w, h, w) { }
+            public Piece(int serial, int h, int w) : this(serial, h, w, h, w, MeasurementSide.Both) { }
 
             public int Area     => H * W;
             public int Longest  => Math.Max(H, W);
@@ -786,6 +799,7 @@ namespace GreenWoodWorkAging.Services
             public int W { get; }
             public int H { get; }
             public bool Rotated { get; }
+            private bool PreferredRotated { get; }
 
             /// <summary>Area abandoned around this piece, whether reusable or not.</summary>
             public int Leftover { get; }
@@ -795,11 +809,13 @@ namespace GreenWoodWorkAging.Services
 
             public int Score => Leftover + DeadWeight * Dead;
 
-            public Spot(int freeIndex, Rect free, int x, int y, int w, int h, bool rotated)
+            public Spot(int freeIndex, Rect free, int x, int y, int w, int h, bool rotated,
+                        bool preferredRotated)
             {
                 FreeIndex = freeIndex;
                 X = x; Y = y; W = w; H = h;
                 Rotated   = rotated;
+                PreferredRotated = preferredRotated;
 
                 Leftover = free.Area - w * h;
                 Dead     = Split(free, x, y, w, h).Sum(r => DeadOf(r));
@@ -834,7 +850,7 @@ namespace GreenWoodWorkAging.Services
             public bool BetterThan(Spot other)
             {
                 if (Score != other.Score)     return Score < other.Score;
-                if (Rotated != other.Rotated) return !Rotated;
+                if (Rotated != other.Rotated) return Rotated == PreferredRotated;
                 return Leftover < other.Leftover;
             }
 
@@ -845,7 +861,8 @@ namespace GreenWoodWorkAging.Services
                 Y              = Y,
                 WidthSixteenths   = W,
                 HeightSixteenths  = H,
-                Rotated        = Rotated
+                Rotated        = Rotated,
+                TapeSelection  = piece.TapeSelection
             };
         }
 
@@ -859,14 +876,16 @@ namespace GreenWoodWorkAging.Services
             public List<PlacedPiece> Placed { get; } = new();
 
             public OpenSheet(int number, int widthSixteenths, int heightSixteenths,
-                             int bladeThicknessSixteenths = 0)
+                             int bladeThicknessSixteenths = 0,
+                             SheetCuttingDirection cuttingDirection = SheetCuttingDirection.Any)
             {
                 Layout = new SheetLayout
                 {
                     Number                    = number,
                     SheetWidthSixteenths      = widthSixteenths,
                     SheetHeightSixteenths     = heightSixteenths,
-                    BladeThicknessSixteenths  = bladeThicknessSixteenths
+                    BladeThicknessSixteenths  = bladeThicknessSixteenths,
+                    CuttingDirection          = cuttingDirection
                 };
                 _free.Add(new Rect(0, 0, widthSixteenths, heightSixteenths));
             }
@@ -875,7 +894,8 @@ namespace GreenWoodWorkAging.Services
             public static OpenSheet Rebuild(OpenSheet source, int widthSixteenths, int heightSixteenths)
             {
                 var copy = new OpenSheet(source.Layout.Number, widthSixteenths, heightSixteenths,
-                                         source.Layout.BladeThicknessSixteenths);
+                                         source.Layout.BladeThicknessSixteenths,
+                                         source.Layout.CuttingDirection);
                 foreach (var placed in source.Placed)
                 {
                     // The replay follows the same splits and the same merges, so the block each
@@ -922,11 +942,26 @@ namespace GreenWoodWorkAging.Services
                 {
                     var free = _free[i];
 
-                    foreach (var (actualW, actualH, rotated) in new[]
+                    var orientations = Layout.CuttingDirection switch
                     {
-                        (piece.ActualW, piece.ActualH, false),
-                        (piece.ActualH, piece.ActualW, true)
-                    })
+                        SheetCuttingDirection.HeightWise => new[]
+                        {
+                            (piece.ActualW, piece.ActualH, false),
+                            (piece.ActualH, piece.ActualW, true)
+                        },
+                        SheetCuttingDirection.WidthWise => new[]
+                        {
+                            (piece.ActualH, piece.ActualW, true),
+                            (piece.ActualW, piece.ActualH, false)
+                        },
+                        _ => new[]
+                        {
+                            (piece.ActualW, piece.ActualH, false),
+                            (piece.ActualH, piece.ActualW, true)
+                        }
+                    };
+
+                    foreach (var (actualW, actualH, rotated) in orientations)
                     {
                         if (actualW > free.W || actualH > free.H) continue;
 
@@ -967,7 +1002,8 @@ namespace GreenWoodWorkAging.Services
                                         continue;
                                 }
 
-                                yield return new Spot(i, free, x, y, effW, effH, rotated);
+                                yield return new Spot(i, free, x, y, effW, effH, rotated,
+                                    Layout.CuttingDirection == SheetCuttingDirection.WidthWise);
                             }
                         }
                     }
@@ -1012,7 +1048,8 @@ namespace GreenWoodWorkAging.Services
                     Y                = y,
                     WidthSixteenths  = actualW,
                     HeightSixteenths = actualH,
-                    Rotated          = rotated
+                    Rotated          = rotated,
+                    TapeSelection    = piece.TapeSelection
                 });
                 Placed.Add(new PlacedPiece(piece, free, freeIndex, x, y, w, h, rotated));
             }
@@ -1100,10 +1137,11 @@ namespace GreenWoodWorkAging.Services
             }
 
             public State StartNewSheet(Piece piece, int widthSixteenths, int heightSixteenths,
-                                       int bladeThicknessSixteenths = 0)
+                                       int bladeThicknessSixteenths = 0,
+                                       SheetCuttingDirection cuttingDirection = SheetCuttingDirection.Any)
             {
                 var fresh = new OpenSheet(Sheets.Count + 1, widthSixteenths, heightSixteenths,
-                                          bladeThicknessSixteenths);
+                                          bladeThicknessSixteenths, cuttingDirection);
                 fresh.Place(piece, fresh.FindSpot(piece)!);
 
                 var sheets = new List<OpenSheet>(Sheets) { fresh };

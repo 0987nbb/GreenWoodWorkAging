@@ -1,5 +1,7 @@
 namespace GreenWoodWorkAging.Models
 {
+    public enum SheetCuttingDirection { Any = 0, HeightWise = 1, WidthWise = 2 }
+
     /// <summary>
     /// One physical piece placed on a sheet. Every number is in sixteenths of an inch
     /// measured from the sheet's top-left corner, so a cutting plan is exact
@@ -27,6 +29,7 @@ namespace GreenWoodWorkAging.Models
 
         /// <summary>True when the piece is turned 90° from how it was typed.</summary>
         public bool Rotated { get; set; }
+        public MeasurementSide TapeSelection { get; set; } = MeasurementSide.Both;
 
         public int Area => WidthSixteenths * HeightSixteenths;
         public int Right  => X + WidthSixteenths;
@@ -68,12 +71,14 @@ namespace GreenWoodWorkAging.Models
         /// <summary>Blade thickness (kerf / cutting loss) applied to cuts on this sheet, in sixteenths of an inch.</summary>
         public int BladeThicknessSixteenths { get; set; } = 3;
         public double BladeThicknessSooter => BladeThicknessSixteenths / (double)Sooter.PerSooter;
+        public SheetCuttingDirection CuttingDirection { get; set; } = SheetCuttingDirection.Any;
 
         public List<CutPlacement> Placements { get; } = new();
         public List<ScrapRect> Scrap { get; } = new();
 
         public int SheetArea => SheetWidthSixteenths * SheetHeightSixteenths;
         public int UsedArea  => Placements.Sum(p => p.Area);
+        public int KerfWasteArea => Math.Max(0, SheetArea - UsedArea - Scrap.Sum(s => s.Area));
 
         /// <summary>Share of the sheet that becomes a piece rather than scrap.</summary>
         public double UsedPercent => SheetArea == 0 ? 0 : UsedArea * 100.0 / SheetArea;
@@ -132,6 +137,7 @@ namespace GreenWoodWorkAging.Models
     {
         public int SheetWidthSixteenths { get; set; }
         public int SheetHeightSixteenths { get; set; }
+        public SheetCuttingDirection CuttingDirection { get; set; } = SheetCuttingDirection.Any;
 
         /// <summary>Blade thickness (cutting loss / kerf) used for this plan, in sixteenths of an inch.</summary>
         public int BladeThicknessSixteenths { get; set; } = 3;

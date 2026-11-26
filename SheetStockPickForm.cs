@@ -32,7 +32,15 @@ namespace GreenWoodWorkAging
 
         // Blade thickness input — default 1.5 Suter = 3 sixteenths
         private readonly TextBox _bladeBox = new();
+        private readonly ComboBox _directionBox = new();
         private const double DefaultBladeSooter = 1.5;
+
+        private static readonly (SheetCuttingDirection Direction, string Text)[] DirectionChoices =
+        {
+            (SheetCuttingDirection.Any, "No restriction — existing optimization"),
+            (SheetCuttingDirection.HeightWise, "Height Only — prefer measured height upright; rotate if needed"),
+            (SheetCuttingDirection.WidthWise, "Width Only — prefer measured width upright; rotate if needed")
+        };
 
         /// <summary>What the shop wrote, once it pressed Optimize. Empty means "cut as before".</summary>
         public List<SheetCuttingOptimizer.StockSheet> Stock { get; } = new();
@@ -41,14 +49,15 @@ namespace GreenWoodWorkAging
         /// Blade thickness in sixteenths of an inch chosen by the user. Zero means kerf is ignored.
         /// </summary>
         public int BladeThicknessSixteenths { get; private set; } = (int)Math.Round(DefaultBladeSooter * Sooter.PerSooter);
+        public SheetCuttingDirection CuttingDirection { get; private set; } = SheetCuttingDirection.Any;
 
         public SheetStockPickForm(IEnumerable<string> sheetCodes)
         {
             Text            = "Sheets in stock";
             BackColor       = CBg;
             StartPosition   = FormStartPosition.CenterParent;
-            ClientSize      = new Size(760, 500);
-            MinimumSize     = new Size(620, 400);
+            ClientSize      = new Size(760, 550);
+            MinimumSize     = new Size(620, 440);
             Font            = new Font("Segoe UI", 9f);
             MinimizeBox     = false;
             AppIcon.Apply(this);
@@ -57,7 +66,7 @@ namespace GreenWoodWorkAging
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 4,
+                RowCount    = 5,
                 BackColor   = CBg,
                 Padding     = new Padding(16, 12, 16, 12)
             };
@@ -66,11 +75,13 @@ namespace GreenWoodWorkAging
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             root.Controls.Add(BuildHeading(),   0, 0);
             root.Controls.Add(BuildGrid(),      0, 1);
             root.Controls.Add(BuildBladeRow(),  0, 2);
-            root.Controls.Add(BuildButtons(),   0, 3);
+            root.Controls.Add(BuildDirectionRow(), 0, 3);
+            root.Controls.Add(BuildButtons(),   0, 4);
 
             Controls.Add(root);
 
@@ -217,6 +228,51 @@ namespace GreenWoodWorkAging
             return card;
         }
 
+        private Control BuildDirectionRow()
+        {
+            var card = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = CCard,
+                Padding = new Padding(14, 8, 14, 8),
+                Height = 48
+            };
+            card.Paint += (_, e) => PaintBorder(e.Graphics, card);
+
+            var flow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+
+            flow.Controls.Add(new Label
+            {
+                Text = "↕  Cutting direction:",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = CText,
+                AutoSize = true,
+                Margin = new Padding(0, 6, 10, 0)
+            });
+
+            _directionBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            _directionBox.FlatStyle = FlatStyle.Flat;
+            _directionBox.Font = FLine;
+            _directionBox.BackColor = CInputBg;
+            _directionBox.Width = 440;
+            _directionBox.Margin = new Padding(0, 2, 0, 0);
+            foreach (var choice in DirectionChoices)
+                _directionBox.Items.Add(choice.Text);
+            _directionBox.SelectedIndex = 0;
+            flow.Controls.Add(_directionBox);
+
+            card.Controls.Add(flow);
+            return card;
+        }
+
         private Control BuildButtons()
         {
             var bar = new TableLayoutPanel
@@ -336,6 +392,7 @@ namespace GreenWoodWorkAging
             }
 
             BladeThicknessSixteenths = bladeSixteenths;
+            CuttingDirection = DirectionChoices[_directionBox.SelectedIndex].Direction;
             Stock.Clear();
             Stock.AddRange(read);
             DialogResult = DialogResult.OK;

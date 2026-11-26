@@ -2777,7 +2777,8 @@ namespace GreenWoodWorkAging
 
             // One plan per sheet code: a size typed under "KMI 123" is never placed on a sheet
             // of another material. A bill without codes is one group and packs as it always did.
-            var opt = new SheetCuttingOptimizer(bladeThicknessSixteenths: ask.BladeThicknessSixteenths);
+            var opt = new SheetCuttingOptimizer(bladeThicknessSixteenths: ask.BladeThicknessSixteenths,
+                                                cuttingDirection: ask.CuttingDirection);
             var plan = ask.Stock.Count > 0 ? opt.OptimizeBySheetCode(_measurements, ask.Stock)
                                            : opt.OptimizeBySheetCode(_measurements);
 

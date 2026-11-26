@@ -132,6 +132,9 @@ namespace GreenWoodWorkAging
                 notes.Add(($"✂  Blade thickness: {plan.BladeThicknessSooter:0.##} Suter " +
                            $"({plan.BladeThicknessSixteenths / (double)Sooter.PerInch:0.####} inch) — kerf included in layout", false));
 
+            if (plan.CuttingDirection != SheetCuttingDirection.Any)
+                notes.Add(($"Cutting direction: {(plan.CuttingDirection == SheetCuttingDirection.HeightWise ? "Height-wise" : "Width-wise")}", false));
+
             var bySource = plan.Sheets
                                .GroupBy(s => s.Source)
                                .Where(g => g.Key.Length > 0)
@@ -281,7 +284,7 @@ namespace GreenWoodWorkAging
                 : "";
 
             int usedPct = (int)Math.Round(sheet.UsedPercent);
-            int scrapArea = sheet.Scrap.Sum(s => s.Area);
+            int scrapArea = sheet.Scrap.Sum(s => s.Area) + sheet.KerfWasteArea;
             double scrapPct = sheet.SheetArea > 0 ? scrapArea * 100.0 / sheet.SheetArea : 0;
             string usedText = $"{sizeText}{sheet.Placements.Count} pieces · {sheet.UsedPercent:0.#}% used · {scrapPct:0.#}% waste";
 

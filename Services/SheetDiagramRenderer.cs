@@ -20,6 +20,7 @@ namespace GreenWoodWorkAging.Services
         private static readonly Color ScrapLine = Color.FromArgb(190, 201, 192);
         private static readonly Color Ink       = Color.FromArgb(34, 49, 42);
         private static readonly Color Subtle    = Color.FromArgb(122, 137, 128);
+        private static readonly Color KerfFill  = Color.FromArgb(165, 68, 74, 72);
 
         /// <summary>One colour per grid row, so the same size is recognisable across sheets.</summary>
         private static readonly (Color Fill, Color Line)[] Palette =
@@ -63,6 +64,8 @@ namespace GreenWoodWorkAging.Services
             foreach (var scrap in sheet.Scrap)
                 DrawScrap(g, origin, scale, scrap);
 
+            DrawKerfGaps(g, origin, scale, sheet);
+
             foreach (var piece in sheet.Placements)
                 DrawPiece(g, origin, scale, piece);
 
@@ -97,6 +100,65 @@ namespace GreenWoodWorkAging.Services
                 using var grey = new SolidBrush(Color.FromArgb(150, 110, 110, 110));
                 g.DrawString("↻", mark, grey, rect.Right - size.Width - 2, rect.Bottom - size.Height - 1);
             }
+
+            DrawTapeEdges(g, rect, piece.TapeSelection, piece.Rotated);
+        }
+
+        private static void DrawKerfGaps(Graphics g, PointF origin, float scale, SheetLayout sheet)
+        {
+            int kerf = sheet.BladeThicknessSixteenths;
+            if (kerf <= 0) return;
+
+            using var brush = new SolidBrush(KerfFill);
+            foreach (var piece in sheet.Placements)
+            {
+                int rightGap = piece.Right < sheet.SheetWidthSixteenths
+                    ? Math.Min(kerf, sheet.SheetWidthSixteenths - piece.Right) : 0;
+                int bottomGap = piece.Bottom < sheet.SheetHeightSixteenths
+                    ? Math.Min(kerf, sheet.SheetHeightSixteenths - piece.Bottom) : 0;
+
+                if (rightGap > 0)
+                    g.FillRectangle(brush, Pixels(origin, scale, piece.Right, piece.Y, rightGap, piece.HeightSixteenths));
+                if (bottomGap > 0)
+                    g.FillRectangle(brush, Pixels(origin, scale, piece.X, piece.Bottom, piece.WidthSixteenths, bottomGap));
+            }
+        }
+
+        [Flags]
+        private enum TapeEdge { None = 0, Top = 1, Right = 2, Bottom = 4, Left = 8 }
+
+        private static void DrawTapeEdges(Graphics g, RectangleF rect, MeasurementSide selection, bool rotated)
+        {
+            TapeEdge edges = selection switch
+            {
+                MeasurementSide.Height => TapeEdge.Left,
+                MeasurementSide.Width => TapeEdge.Top,
+                MeasurementSide.HeightHeight => TapeEdge.Left | TapeEdge.Right,
+                MeasurementSide.HeightWidth => TapeEdge.Left | TapeEdge.Top,
+                MeasurementSide.WidthWidth => TapeEdge.Top | TapeEdge.Bottom,
+                MeasurementSide.HeightHeightWidth => TapeEdge.Left | TapeEdge.Right | TapeEdge.Top,
+                MeasurementSide.WidthWidthHeight => TapeEdge.Top | TapeEdge.Bottom | TapeEdge.Left,
+                MeasurementSide.Both => TapeEdge.Top | TapeEdge.Right | TapeEdge.Bottom | TapeEdge.Left,
+                _ => TapeEdge.None
+            };
+
+            if (rotated)
+            {
+                TapeEdge turned = TapeEdge.None;
+                if ((edges & TapeEdge.Top) != 0) turned |= TapeEdge.Right;
+                if ((edges & TapeEdge.Right) != 0) turned |= TapeEdge.Bottom;
+                if ((edges & TapeEdge.Bottom) != 0) turned |= TapeEdge.Left;
+                if ((edges & TapeEdge.Left) != 0) turned |= TapeEdge.Top;
+                edges = turned;
+            }
+
+            if (edges == TapeEdge.None) return;
+            using var tapePen = new Pen(Color.Black, 2.6f);
+            float inset = tapePen.Width / 2f;
+            if ((edges & TapeEdge.Top) != 0) g.DrawLine(tapePen, rect.Left, rect.Top + inset, rect.Right, rect.Top + inset);
+            if ((edges & TapeEdge.Right) != 0) g.DrawLine(tapePen, rect.Right - inset, rect.Top, rect.Right - inset, rect.Bottom);
+            if ((edges & TapeEdge.Bottom) != 0) g.DrawLine(tapePen, rect.Left, rect.Bottom - inset, rect.Right, rect.Bottom - inset);
+            if ((edges & TapeEdge.Left) != 0) g.DrawLine(tapePen, rect.Left + inset, rect.Top, rect.Left + inset, rect.Bottom);
         }
 
         private static void DrawScrap(Graphics g, PointF origin, float scale, ScrapRect scrap)
